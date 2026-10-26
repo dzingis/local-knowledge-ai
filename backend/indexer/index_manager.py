@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from backend.indexer.hasher import hash_file
 from backend.indexer.scanner import FileMetadata, FileScanner, ScanResult
@@ -48,7 +48,11 @@ class PersistentScanRecord:
     status: QueueStatus = QueueStatus.PENDING
 
     @classmethod
-    def from_metadata(cls, metadata: FileMetadata, status: QueueStatus = QueueStatus.PENDING) -> "PersistentScanRecord":
+    def from_metadata(
+        cls,
+        metadata: FileMetadata,
+        status: QueueStatus = QueueStatus.PENDING,
+    ) -> "PersistentScanRecord":
         return cls(
             file_name=metadata.file_name,
             full_path=str(metadata.full_path),
@@ -111,6 +115,10 @@ class IncrementalScanResult:
     def pending_changes(self) -> list[ChangeSetItem]:
         return self.new_files + self.modified_files
 
+    @property
+    def has_changes(self) -> bool:
+        return bool(self.new_files or self.modified_files or self.deleted_files)
+
 
 class IndexManager:
     """Coordinates scanning and queue preparation for Milestone 2A."""
@@ -127,10 +135,13 @@ class IndexManager:
     def fingerprint(self, path: Path) -> str:
         return hash_file(path)
 
+    def fingerprints_by_path(self, records: Sequence[PersistentScanRecord]) -> dict[str, str]:
+        return {record.full_path: record.sha256 for record in records}
+
     def compare_with_previous(
         self,
         current_records: Sequence[PersistentScanRecord],
-        previous_fingerprints: dict[str, str],
+        previous_fingerprints: Mapping[str, str],
         previously_known_paths: Iterable[str] | None = None,
     ) -> IncrementalScanResult:
         known_paths = set(previously_known_paths or previous_fingerprints.keys())
@@ -151,13 +162,14 @@ class IndexManager:
 
         deleted_files: list[ChangeSetItem] = []
         missing_paths = known_paths - current_paths
-        for missing_path in missing_paths:
+        for missing_path in sorted(missing_paths):
+            path = Path(missing_path)
             deleted_files.append(
                 ChangeSetItem(
-                    file_name=Path(missing_path).name,
+                    file_name=path.name,
                     full_path=missing_path,
-                    extension=Path(missing_path).suffix.lower(),
-                    folder_path=str(Path(missing_path).parent),
+                    extension=path.suffix.lower(),
+                    folder_path=str(path.parent),
                     file_size_bytes=0,
                     modified_utc=datetime.now(timezone.utc),
                     sha256=previous_fingerprints.get(missing_path, ""),
