@@ -1,131 +1,77 @@
+version: "3.9"
+
 services:
 
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: lkai-sqlserver
-    hostname: sqlserver
-
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_PID: "Developer"
-      MSSQL_SA_PASSWORD: ${SQL_PASSWORD}
-
-    ports:
-      - "${SQL_PORT}:1433"
-
-    volumes:
-      - sqlserver-data:/var/opt/mssql
-
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    container_name: lkai-backend
     restart: unless-stopped
 
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "/opt/mssql-tools18/bin/sqlcmd",
-          "-C",
-          "-S",
-          "localhost",
-          "-U",
-          "sa",
-          "-P",
-          "${SQL_PASSWORD}",
-          "-Q",
-          "SELECT 1"
-        ]
+    env_file:
+      - .env
 
-      interval: 10s
-      timeout: 5s
-      retries: 20
+    ports:
+      - "${BACKEND_PORT}:8000"
+
+    depends_on:
+      - qdrant
+
+    volumes:
+      - ./backend:/app/backend
+      - ./knowledge:/knowledge
+
+    networks:
+      - lkai
+
 
   qdrant:
-
     image: qdrant/qdrant:latest
-
     container_name: lkai-qdrant
+
+    restart: unless-stopped
 
     ports:
       - "${QDRANT_PORT}:6333"
 
     volumes:
-      - qdrant-data:/qdrant/storage
+      - qdrant_storage:/qdrant/storage
 
-    restart: unless-stopped
+    networks:
+      - lkai
 
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-f",
-          "http://localhost:6333/healthz"
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-
-  ollama:
-
-    image: ollama/ollama:latest
-
-    container_name: lkai-ollama
-
-    ports:
-      - "${OLLAMA_PORT}:11434"
-
-    volumes:
-      - ollama-data:/root/.ollama
-
-    restart: unless-stopped
 
   open-webui:
-
     image: ghcr.io/open-webui/open-webui:main
 
     container_name: lkai-webui
 
+    restart: unless-stopped
+
     depends_on:
-      ollama:
-        condition: service_started
+      - qdrant
 
     environment:
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
 
     ports:
       - "${OPENWEBUI_PORT}:8080"
 
-    restart: unless-stopped
+    volumes:
+      - webui:/app/backend/data
 
-  backend:
+    networks:
+      - lkai
 
-    build:
-      context: .
-      dockerfile: docker/backend/Dockerfile
 
-    container_name: lkai-backend
+networks:
 
-    env_file:
-      - .env
+  lkai:
 
-    depends_on:
-      sqlserver:
-        condition: service_healthy
-
-      qdrant:
-        condition: service_healthy
-
-      ollama:
-        condition: service_started
-
-    ports:
-      - "${BACKEND_PORT}:8000"
-
-    restart: unless-stopped
 
 volumes:
 
-  sqlserver-data:
+  qdrant_storage:
 
-  qdrant-data:
-
-  ollama-data:
+  webui:

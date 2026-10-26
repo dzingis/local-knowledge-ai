@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -32,10 +33,30 @@ app = FastAPI(
 app.include_router(health_router)
 
 
+=======
+from fastapi import FastAPI
+
+app = FastAPI(
+    title="Local Knowledge AI",
+    version="0.1.0"
+)
+
+>>>>>>> 39be1ee (Complete Milestone 1 infrastructure)
 @app.get("/")
 async def root():
     return {
         "application": "Local Knowledge AI",
+<<<<<<< HEAD
         "version": "0.1.0",
         "status": "running",
     }
+=======
+        "status": "running"
+    }
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy"
+    }
+>>>>>>> 39be1ee (Complete Milestone 1 infrastructure)

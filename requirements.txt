@@ -1,24 +1,34 @@
-fastapi==0.116.1
-uvicorn[standard]==0.35.0
+fastapi
+uvicorn
+sqlalchemy
+pyodbc
+pydantic
+python-dotenv
 
-python-dotenv==1.1.1
+langchain
 
-sqlalchemy==2.0.43
+langchain-community
 
-pyodbc==5.2.0
+qdrant-client
 
-pydantic==2.11.7
+sentence-transformers
 
-qdrant-client==1.15.1
+pymupdf
 
-ollama==0.5.3
+python-docx
 
-httpx==0.28.1
+markdown
 
-requests==2.32.4
+beautifulsoup4
 
-watchdog==6.0.0
+watchdog
 
-python-multipart==0.0.20
+networkx
 
+<<<<<<< HEAD
 orjson==3.11.3
+=======
+numpy
+
+pandas
+>>>>>>> 39be1ee (Complete Milestone 1 infrastructure)
