@@ -25,6 +25,8 @@ class BackgroundWorkerState:
     last_result: WorkerResult | None = None
     last_heartbeat_at: datetime | None = None
     recovered_items: int = 0
+    idle_iterations: int = 0
+    current_interval_seconds: float = 0.0
 
 
 class BackgroundWorkerService:
@@ -43,15 +45,21 @@ class BackgroundWorkerService:
         heartbeat_repository: WorkerHeartbeatRepository | None = None,
         interval_seconds: float = 2.0,
         heartbeat_worker_id: str = "background-worker",
+        idle_interval_seconds: float = 10.0,
+        active_interval_seconds: float = 0.5,
+        max_backoff_seconds: float = 30.0,
     ) -> None:
         self._worker = worker
         self._queue_repository = queue_repository
         self._heartbeat_repository = heartbeat_repository
-        self._interval_seconds = max(0.1, interval_seconds)
+        self._base_interval_seconds = max(0.1, interval_seconds)
+        self._idle_interval_seconds = max(self._base_interval_seconds, idle_interval_seconds)
+        self._active_interval_seconds = max(0.1, min(active_interval_seconds, self._base_interval_seconds))
+        self._max_backoff_seconds = max(self._idle_interval_seconds, max_backoff_seconds)
         self._heartbeat_worker_id = heartbeat_worker_id
         self._task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
-        self._state = BackgroundWorkerState()
+        self._state = BackgroundWorkerState(current_interval_seconds=self._base_interval_seconds)
 
     @property
     def state(self) -> BackgroundWorkerState:
@@ -76,6 +84,7 @@ class BackgroundWorkerService:
         self._stop_event.clear()
         self._state.running = True
         self._state.locked = True
+        self._state.current_interval_seconds = self._base_interval_seconds
         self._recover_processing_items()
         self._task = asyncio.create_task(self._run_loop())
         logger.info("Background worker service started")
@@ -104,20 +113,41 @@ class BackgroundWorkerService:
                         self._state.last_result = result
                         if result is not None:
                             self._state.processed += 1
+                            self._state.idle_iterations = 0
+                            self._state.current_interval_seconds = self._active_interval_seconds
                             logger.info("Processed %s with outcome %s", result.file_path, result.outcome.value)
-                        self._persist_heartbeat(
-                            status="running",
-                            current_file=result.file_path if result is not None else None,
-                        )
+                            self._persist_heartbeat(status="running", current_file=result.file_path)
+                        else:
+                            self._state.idle_iterations += 1
+                            self._state.current_interval_seconds = self._next_backoff_interval(
+                                self._state.idle_iterations,
+                                self._state.current_interval_seconds,
+                            )
+                            self._persist_heartbeat(status="idle", current_file=None)
                     except Exception:
                         logger.exception("Background worker iteration failed")
+                        self._state.idle_iterations += 1
+                        self._state.current_interval_seconds = self._next_backoff_interval(
+                            self._state.idle_iterations,
+                            self._state.current_interval_seconds,
+                        )
                         self._persist_heartbeat(status="error", current_file=None)
-                    await asyncio.sleep(self._interval_seconds)
+
+                    await asyncio.sleep(self._state.current_interval_seconds)
             finally:
                 self._state.running = False
                 self._state.locked = False
                 self._persist_heartbeat("stopped", None)
                 logger.info("Background worker loop exited")
+
+    def _next_backoff_interval(self, idle_iterations: int, current_interval: float) -> float:
+        if idle_iterations <= 0:
+            return self._active_interval_seconds
+
+        if idle_iterations == 1:
+            return self._idle_interval_seconds
+
+        return min(self._max_backoff_seconds, max(self._active_interval_seconds, current_interval * 2.0))
 
     def _recover_processing_items(self) -> None:
         if self._queue_repository is None:
