@@ -10,6 +10,7 @@ from backend.api.schemas import (
     QueueSummary,
     ScanResponse,
     StatsSummary,
+    WorkerStatusResponse,
 )
 from backend.workers.processing_worker import ProcessingWorker
 
@@ -19,6 +20,25 @@ router = APIRouter(prefix="/api", tags=["api"])
 @router.get("/status")
 def get_status() -> dict[str, str]:
     return {"status": "ok", "service": "local-knowledge-ai"}
+
+
+@router.get("/worker/status", response_model=WorkerStatusResponse)
+def get_worker_status(worker: ProcessingWorker = Depends(dependencies.get_processing_worker)) -> WorkerStatusResponse:
+    progress = worker.progress
+    return WorkerStatusResponse(
+        worker_id=progress.worker_id,
+        running=progress.status.value == "running",
+        locked=False,
+        status=progress.status.value,
+        iterations=getattr(progress, "iterations", 0),
+        processed=progress.processed,
+        succeeded=progress.succeeded,
+        failed=progress.failed,
+        retried=progress.retried,
+        current_file=progress.current_file,
+        last_error=progress.last_error,
+        average_duration_ms=progress.average_duration_ms,
+    )
 
 
 @router.post("/scan", response_model=ScanResponse)
