@@ -86,6 +86,57 @@ class DocumentRepository:
             embeddings=tuple(stored_embeddings),
         )
 
+    def list_documents(self) -> tuple[StoredDocument, ...]:
+        with self._connect() as connection:
+            cursor = connection.cursor()
+            rows = cursor.execute(
+                """
+                SELECT
+                    DocumentId,
+                    SourcePath,
+                    Title,
+                    ParserKind,
+                    ObjectType,
+                    Checksum,
+                    Language,
+                    PageCount,
+                    LineCount,
+                    CharacterCount,
+                    CreatedAt,
+                    ModifiedAt,
+                    MetadataJson
+                FROM AI.Documents
+                ORDER BY ModifiedAt DESC;
+                """
+            ).fetchall()
+        return tuple(self._row_to_document(row) for row in rows)
+
+    def get_document(self, document_id: str) -> StoredDocument | None:
+        with self._connect() as connection:
+            cursor = connection.cursor()
+            row = cursor.execute(
+                """
+                SELECT
+                    DocumentId,
+                    SourcePath,
+                    Title,
+                    ParserKind,
+                    ObjectType,
+                    Checksum,
+                    Language,
+                    PageCount,
+                    LineCount,
+                    CharacterCount,
+                    CreatedAt,
+                    ModifiedAt,
+                    MetadataJson
+                FROM AI.Documents
+                WHERE DocumentId = ?;
+                """,
+                (document_id,),
+            ).fetchone()
+        return self._row_to_document(row) if row is not None else None
+
     def get_document_by_path(self, source_path: str) -> StoredDocument | None:
         with self._connect() as connection:
             cursor = connection.cursor()
@@ -115,6 +166,27 @@ class DocumentRepository:
         if row is None:
             return None
         return self._row_to_document(row)
+
+    def delete_document(self, document_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute("DELETE FROM AI.ChunkEmbeddings WHERE ChunkId IN (SELECT ChunkId FROM AI.DocumentChunks WHERE DocumentId = ?);", (document_id,))
+            cursor.execute("DELETE FROM AI.DocumentChunks WHERE DocumentId = ?;", (document_id,))
+            cursor.execute("DELETE FROM AI.Documents WHERE DocumentId = ?;", (document_id,))
+            connection.commit()
+            return cursor.rowcount > 0
+
+    def get_stats(self) -> dict[str, int]:
+        with self._connect() as connection:
+            cursor = connection.cursor()
+            documents = cursor.execute("SELECT COUNT(*) AS Cnt FROM AI.Documents;").fetchone()
+            chunks = cursor.execute("SELECT COUNT(*) AS Cnt FROM AI.DocumentChunks;").fetchone()
+            embeddings = cursor.execute("SELECT COUNT(*) AS Cnt FROM AI.ChunkEmbeddings;").fetchone()
+        return {
+            "documents": int(getattr(documents, "Cnt", 0) or 0),
+            "chunks": int(getattr(chunks, "Cnt", 0) or 0),
+            "embeddings": int(getattr(embeddings, "Cnt", 0) or 0),
+        }
 
     def _upsert_document(self, parsed_document: ParsedDocument) -> StoredDocument:
         now = datetime.now(timezone.utc)
