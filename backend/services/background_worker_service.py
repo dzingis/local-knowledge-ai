@@ -5,6 +5,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from backend.indexer.index_manager import QueueStatus
+from backend.indexer.sql_queue_repository import QueueRepositoryRecord, SqlQueueRepository
 from backend.repositories.worker_heartbeat_repository import (
     WorkerHeartbeatRecord,
     WorkerHeartbeatRepository,
@@ -22,6 +24,7 @@ class BackgroundWorkerState:
     processed: int = 0
     last_result: WorkerResult | None = None
     last_heartbeat_at: datetime | None = None
+    recovered_items: int = 0
 
 
 class BackgroundWorkerService:
@@ -36,11 +39,13 @@ class BackgroundWorkerService:
     def __init__(
         self,
         worker: ProcessingWorker,
+        queue_repository: SqlQueueRepository | None = None,
         heartbeat_repository: WorkerHeartbeatRepository | None = None,
         interval_seconds: float = 2.0,
         heartbeat_worker_id: str = "background-worker",
     ) -> None:
         self._worker = worker
+        self._queue_repository = queue_repository
         self._heartbeat_repository = heartbeat_repository
         self._interval_seconds = max(0.1, interval_seconds)
         self._heartbeat_worker_id = heartbeat_worker_id
@@ -71,6 +76,7 @@ class BackgroundWorkerService:
         self._stop_event.clear()
         self._state.running = True
         self._state.locked = True
+        self._recover_processing_items()
         self._task = asyncio.create_task(self._run_loop())
         logger.info("Background worker service started")
         return True
@@ -112,6 +118,23 @@ class BackgroundWorkerService:
                 self._state.locked = False
                 self._persist_heartbeat("stopped", None)
                 logger.info("Background worker loop exited")
+
+    def _recover_processing_items(self) -> None:
+        if self._queue_repository is None:
+            return
+
+        recovered = 0
+        try:
+            processing_records = self._queue_repository._load_by_status(QueueStatus.PROCESSING)  # type: ignore[attr-defined]
+            for record in processing_records:
+                if self._queue_repository.retry(record.full_path):
+                    recovered += 1
+            if recovered:
+                logger.warning("Recovered %s processing queue item(s) after startup", recovered)
+        except Exception:
+            logger.exception("Failed to recover processing queue items")
+        finally:
+            self._state.recovered_items = recovered
 
     def _persist_heartbeat(self, status: str, current_file: str | None) -> None:
         self._state.last_heartbeat_at = datetime.now(timezone.utc)
