@@ -123,3 +123,18 @@ class DocumentDeleteResponse(BaseModel):
     chunks_deleted: int = 0
     embeddings_deleted: int = 0
     vectors_deleted: int = 0
+
+
+class WorkerMetricsResponse(BaseModel):
+    worker_id: str
+    running: bool
+    locked: bool
+    paused: bool
+    iterations: int
+    processed: int
+    recovered_items: int = 0
+    idle_iterations: int = 0
+    current_interval_seconds: float = 0.0
+    last_heartbeat_at: datetime | None = None
+    last_result_file: str | None = None
+    last_result_outcome: str | None = None
