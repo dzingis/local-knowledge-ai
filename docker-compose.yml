@@ -12,6 +12,14 @@ services:
     env_file:
       - .env
 
+    environment:
+      WATCH_ENABLED: "${WATCH_ENABLED:-false}"
+      WATCH_FOLDERS: "${WATCH_FOLDERS:-/knowledge}"
+      WATCH_RECURSIVE: "${WATCH_RECURSIVE:-true}"
+      WATCH_DEBOUNCE_SECONDS: "${WATCH_DEBOUNCE_SECONDS:-2}"
+      WATCH_POLL_INTERVAL: "${WATCH_POLL_INTERVAL:-30}"
+      WATCH_IGNORE_PATTERNS: "${WATCH_IGNORE_PATTERNS:-~$*,*.tmp,*.part}"
+
     ports:
       - "${BACKEND_PORT}:8000"
 
@@ -20,7 +28,7 @@ services:
 
     volumes:
       - ./backend:/app/backend
-      - ./knowledge:/knowledge
+      - "${WATCH_HOST_PATH:-./knowledge}:/knowledge"
 
     networks:
       - lkai

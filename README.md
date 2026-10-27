@@ -35,3 +35,26 @@ Foundation work:
 
 ## Status
 Initial project skeleton.
+
+## Automatic folder watcher
+
+Set `WATCH_ENABLED=true` to enqueue files created or changed in `WATCH_FOLDERS`.
+The watcher uses the existing ingestion queue; parsing, chunking, embedding, and
+indexing remain the responsibility of the background worker.
+
+```dotenv
+WATCH_ENABLED=true
+WATCH_FOLDERS=/knowledge
+WATCH_RECURSIVE=true
+WATCH_DEBOUNCE_SECONDS=2
+WATCH_POLL_INTERVAL=30
+WATCH_IGNORE_PATTERNS=~$*,*.tmp,*.part
+```
+
+Set multiple folders as a comma-separated list or JSON array. For Docker,
+folders must be mounted into the backend container. `WATCH_HOST_PATH` selects
+the host folder mounted at `/knowledge` (default: `./knowledge`), while
+`WATCH_FOLDERS` contains container paths. A Windows UNC share should be mounted
+on the Docker host and its container mount path added to `WATCH_FOLDERS`.
+
+The watcher health endpoint is available at `GET /watcher`.

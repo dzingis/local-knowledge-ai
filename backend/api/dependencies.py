@@ -16,6 +16,7 @@ from backend.repositories.model_repository import ModelRepository
 from backend.repositories.prompt_repository import PromptRepository
 from backend.vectorstore.qdrant_client import InMemoryQdrantClient
 from backend.vectorstore.qdrant_repository import QdrantRepository
+from backend.watchers.watch_service import WatchService
 from backend.workers.processing_worker import ParserQueueProcessor, ProcessingWorker
 
 
@@ -78,6 +79,11 @@ def get_processing_worker() -> ProcessingWorker:
 @lru_cache(maxsize=1)
 def get_background_worker_service() -> ProcessingWorker:
     return get_processing_worker()
+
+
+@lru_cache(maxsize=1)
+def get_watch_service() -> WatchService:
+    return WatchService(repository=get_sql_queue_repository())
 
 
 @lru_cache(maxsize=1)

@@ -183,6 +183,24 @@ class SqlQueueRepository:
         records = [QueueRepositoryRecord.from_change_set_item(item) for item in items]
         return self.enqueue_many(records)
 
+    def get_fingerprint(self, full_path: str) -> tuple[str, datetime] | None:
+        with self._connect() as connection:
+            row = connection.cursor().execute(
+                """
+                SELECT Sha256, ModifiedUtc
+                FROM AI.IngestionQueue
+                WHERE FullPath = ?;
+                """,
+                (full_path,),
+            ).fetchone()
+        if row is None:
+            return None
+
+        modified_utc = row.ModifiedUtc
+        if modified_utc.tzinfo is None:
+            modified_utc = modified_utc.replace(tzinfo=timezone.utc)
+        return str(row.Sha256), modified_utc
+
     def get_pending(self) -> tuple[QueueRepositoryRecord, ...]:
         return self._load_by_status(QueueStatus.PENDING)
 
