@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Callable
 
 from watchdog.observers import Observer
+from watchdog.observers.api import BaseObserver
+from watchdog.observers.polling import PollingObserver
 
 from backend.config.settings import Settings
 from backend.indexer.index_manager import ChangeType, QueueStatus
@@ -26,13 +28,13 @@ class FileWatcher:
         folder: str | Path,
         repository: SqlQueueRepository,
         settings: Settings,
-        observer_factory: Callable[[], Observer] = Observer,
+        observer_factory: Callable[[], BaseObserver] | None = None,
     ) -> None:
         self.folder = Path(folder)
         self._repository = repository
         self._settings = settings
-        self._observer_factory = observer_factory
-        self._observer: Observer | None = None
+        self._observer_factory = observer_factory or self._create_observer
+        self._observer: BaseObserver | None = None
         self._lock = threading.RLock()
         self._timers: dict[str, threading.Timer] = {}
         self._stability: dict[str, tuple[tuple[int, int] | None, float]] = {}
@@ -69,6 +71,13 @@ class FileWatcher:
         self._observer = observer
         self._stopped = False
         logger.info('Watching folder: %s', self.folder)
+
+    @staticmethod
+    def _create_observer() -> BaseObserver:
+        if Path('/.dockerenv').exists():
+            logger.info('Using Watchdog polling observer for Docker-mounted folders')
+            return PollingObserver()
+        return Observer()
 
     def stop(self) -> None:
         with self._lock:

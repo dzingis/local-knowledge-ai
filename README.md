@@ -44,17 +44,21 @@ indexing remain the responsibility of the background worker.
 
 ```dotenv
 WATCH_ENABLED=true
-WATCH_FOLDERS=/knowledge
+WATCH_LOCAL_ENABLED=true
+WATCH_NETWORK_ENABLED=false
+WATCH_FOLDERS=/knowledge,\\server\share
 WATCH_RECURSIVE=true
 WATCH_DEBOUNCE_SECONDS=2
 WATCH_POLL_INTERVAL=30
 WATCH_IGNORE_PATTERNS=~$*,*.tmp,*.part
 ```
 
-Set multiple folders as a comma-separated list or JSON array. For Docker,
+`WATCH_ENABLED` is the master switch. Local and network flags control their
+respective paths in `WATCH_FOLDERS`; UNC paths beginning with `\\` (or `//`)
+are treated as network paths. Set both flags to `true` to watch both. Multiple
+folders can be provided as a comma-separated list or JSON array. For Docker,
 folders must be mounted into the backend container. `WATCH_HOST_PATH` selects
 the host folder mounted at `/knowledge` (default: `./knowledge`), while
-`WATCH_FOLDERS` contains container paths. A Windows UNC share should be mounted
-on the Docker host and its container mount path added to `WATCH_FOLDERS`.
+`WATCH_FOLDERS` contains container paths.
 
 The watcher health endpoint is available at `GET /watcher`.

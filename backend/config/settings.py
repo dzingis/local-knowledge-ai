@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     log_dir: Path = Path('logs')
 
     watch_enabled: bool = False
+    watch_local_enabled: bool = True
+    watch_network_enabled: bool = True
     watch_folders: Annotated[list[str], NoDecode] = Field(default_factory=list)
     watch_recursive: bool = True
     watch_debounce_seconds: float = Field(default=2.0, gt=0)

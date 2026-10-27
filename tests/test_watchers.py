@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from watchdog.events import FileCreatedEvent
+from watchdog.observers.polling import PollingObserver
 
 from backend.config.settings import Settings
 from backend.indexer.index_manager import ChangeType, QueueStatus
@@ -138,6 +139,28 @@ def test_unchanged_file_event_is_not_enqueued_twice(tmp_path: Path) -> None:
     assert len(repository.records) == 1
 
 
+def test_watchdog_polling_observer_detects_new_file(tmp_path: Path) -> None:
+    repository = InMemoryQueueRepository()
+    watcher = FileWatcher(
+        tmp_path,
+        repository,
+        _settings(tmp_path),
+        observer_factory=lambda: PollingObserver(timeout=0.1),
+    )
+    watcher.start()
+    try:
+        file_path = tmp_path / 'created-after-watching.txt'
+        file_path.write_text('watchdog event', encoding='utf-8')
+        deadline = time.monotonic() + 2
+        while not repository.records and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+        assert len(repository.records) == 1
+        assert repository.records[0].file_name == file_path.name
+    finally:
+        watcher.stop()
+
+
 def test_network_folder_watcher_reconnects_after_share_returns(tmp_path: Path) -> None:
     share = tmp_path / 'share'
     share.mkdir()
@@ -166,6 +189,27 @@ def test_network_folder_watcher_reconnects_after_share_returns(tmp_path: Path) -
     service._reconcile()
     assert len(made_watchers) == 2
     assert service.watched_folders == [str(share)]
+
+
+def test_local_and_network_watch_flags_filter_folder_types(tmp_path: Path) -> None:
+    service = WatchService(
+        repository=InMemoryQueueRepository(),  # type: ignore[arg-type]
+        settings=_settings(
+            tmp_path,
+            watch_local_enabled=True,
+            watch_network_enabled=False,
+        ),
+    )
+
+    assert service._folder_type_enabled(r'D:\Knowledge')
+    assert not service._folder_type_enabled(r'\\server\share')
+    assert not service._folder_type_enabled('//server/share')
+
+    service._settings.watch_local_enabled = False
+    service._settings.watch_network_enabled = True
+
+    assert not service._folder_type_enabled(r'D:\Knowledge')
+    assert service._folder_type_enabled(r'\\server\share')
 
 
 class FakeWatcher:

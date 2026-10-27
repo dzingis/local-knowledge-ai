@@ -108,7 +108,11 @@ class WatchService:
                 logger.exception('Unexpected error while checking watched folders')
 
     def _reconcile(self) -> None:
-        configured = {str(Path(folder)): folder for folder in self._settings.watch_folders}
+        configured = {
+            str(Path(folder)): folder
+            for folder in self._settings.watch_folders
+            if self._folder_type_enabled(folder)
+        }
         unavailable_now: set[str] = set()
         with self._lock:
             active_paths = tuple(self._watchers)
@@ -157,6 +161,15 @@ class WatchService:
             else:
                 self._record_event(f'Watching folder: {configured_path}')
                 logger.info('Watching folder: %s', configured_path)
+
+    def _folder_type_enabled(self, folder: str) -> bool:
+        normalized = folder.replace('/', '\\')
+        is_network = normalized.startswith('\\\\')
+        return (
+            self._settings.watch_network_enabled
+            if is_network
+            else self._settings.watch_local_enabled
+        )
 
     def _record_event(self, message: str) -> None:
         with self._lock:
