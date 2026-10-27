@@ -24,6 +24,43 @@ class IngestRequest(BaseModel):
     file_path: str
 
 
+class IngestResponse(BaseModel):
+    status: str
+    processed: int = 0
+    details: list[str] = Field(default_factory=list)
+
+
+class ScanResponse(BaseModel):
+    processed: int = 0
+    details: list[str] = Field(default_factory=list)
+
+
+class WorkerStatusResponse(BaseModel):
+    worker_id: str
+    running: bool
+    locked: bool
+    status: str
+    iterations: int = 0
+    processed: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    retried: int = 0
+    current_file: str | None = None
+    last_error: str | None = None
+    average_duration_ms: float = 0.0
+
+
+class QueueSummary(BaseModel):
+    worker_id: str
+    status: str
+    processed: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    retried: int = 0
+    current_file: str | None = None
+    last_error: str | None = None
+
+
 class DocumentSummary(BaseModel):
     document_id: str
     source_path: str
@@ -84,6 +121,15 @@ class StatsResponse(BaseModel):
     chunks: int = 0
     embeddings: int = 0
     queue_items: int = 0
+    conversations: int = 0
+    prompts: int = 0
+    models: int = 0
+
+
+class StatsSummary(BaseModel):
+    documents: int = 0
+    chunks: int = 0
+    embeddings: int = 0
     conversations: int = 0
     prompts: int = 0
     models: int = 0
