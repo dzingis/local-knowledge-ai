@@ -10,6 +10,7 @@ from backend.api.schemas import (
     QueueSummary,
     ScanResponse,
     StatsSummary,
+    WorkerMetricsResponse,
     WorkerStatusResponse,
 )
 from backend.workers.processing_worker import ProcessingWorker
@@ -38,6 +39,27 @@ def get_worker_status(worker: ProcessingWorker = Depends(dependencies.get_proces
         current_file=progress.current_file,
         last_error=progress.last_error,
         average_duration_ms=progress.average_duration_ms,
+    )
+
+
+@router.get("/worker/metrics", response_model=WorkerMetricsResponse)
+def get_worker_metrics(worker: ProcessingWorker = Depends(dependencies.get_processing_worker)) -> WorkerMetricsResponse:
+    background_service = dependencies.get_background_worker_service()
+    state = background_service.state
+    last_result = state.last_result
+    return WorkerMetricsResponse(
+        worker_id=dependencies.get_background_worker_service_worker_id(),
+        running=state.running,
+        locked=state.locked,
+        paused=getattr(state, "paused", False),
+        iterations=state.iterations,
+        processed=state.processed,
+        recovered_items=state.recovered_items,
+        idle_iterations=state.idle_iterations,
+        current_interval_seconds=state.current_interval_seconds,
+        last_heartbeat_at=state.last_heartbeat_at,
+        last_result_file=last_result.file_path if last_result is not None else None,
+        last_result_outcome=last_result.outcome.value if last_result is not None else None,
     )
 
 
