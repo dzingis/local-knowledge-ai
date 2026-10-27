@@ -1,34 +1,30 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from backend.chunking.chunk_engine import ChunkingResult
 from backend.embeddings.embedding_service import EmbeddingBatchResult
 from backend.parsers.parser_models import ParsedDocument
 
 
-@dataclass(frozen=True, slots=True)
-class ScanRequest:
+class ScanRequest(BaseModel):
     root_path: str | None = None
     recursive: bool = True
 
 
-@dataclass(frozen=True, slots=True)
-class ReindexRequest:
+class ReindexRequest(BaseModel):
     root_path: str | None = None
     force: bool = False
 
 
-@dataclass(frozen=True, slots=True)
-class IngestRequest:
+class IngestRequest(BaseModel):
     file_path: str
 
 
-@dataclass(frozen=True, slots=True)
-class DocumentSummary:
+class DocumentSummary(BaseModel):
     document_id: str
     source_path: str
     title: str
@@ -52,8 +48,7 @@ class DocumentSummary:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class ChunkSummary:
+class ChunkSummary(BaseModel):
     chunk_id: str
     document_id: str
     text: str
@@ -62,16 +57,14 @@ class ChunkSummary:
     chunk_index: int
 
 
-@dataclass(frozen=True, slots=True)
-class EmbeddingSummary:
+class EmbeddingSummary(BaseModel):
     chunk_id: str
     model_name: str
     dimensions: int
-    vector: tuple[float, ...] = field(default_factory=tuple)
+    vector: tuple[float, ...] = Field(default_factory=tuple)
 
 
-@dataclass(frozen=True, slots=True)
-class QueueItemSummary:
+class QueueItemSummary(BaseModel):
     file_name: str
     full_path: str
     status: str
@@ -80,15 +73,13 @@ class QueueItemSummary:
     error_message: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class HealthResponse:
+class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "local-knowledge-ai"
     timestamp: datetime | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class StatsResponse:
+class StatsResponse(BaseModel):
     documents: int = 0
     chunks: int = 0
     embeddings: int = 0
@@ -98,32 +89,27 @@ class StatsResponse:
     models: int = 0
 
 
-@dataclass(frozen=True, slots=True)
-class ApiErrorResponse:
+class ApiErrorResponse(BaseModel):
     detail: str
     context: dict[str, Any] | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class DocumentDetailResponse:
+class DocumentDetailResponse(BaseModel):
     document: DocumentSummary
     parsed_document: ParsedDocument | None = None
     chunking_result: ChunkingResult | None = None
     embedding_result: EmbeddingBatchResult | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class DocumentsResponse:
+class DocumentsResponse(BaseModel):
     documents: tuple[DocumentSummary, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
-class QueueResponse:
+class QueueResponse(BaseModel):
     items: tuple[QueueItemSummary, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
-class OperationResponse:
+class OperationResponse(BaseModel):
     success: bool
     message: str
     path: str | None = None
