@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend.api import dependencies
 from backend.api.schemas import (
+    DocumentDeleteResponse,
     DocumentSummary,
     IngestResponse,
     QueueSummary,
@@ -84,9 +83,13 @@ def get_stats(document_repository=Depends(dependencies.get_document_repository))
     )
 
 
-@router.delete("/document/{document_id}")
-def delete_document(document_id: str, document_repository=Depends(dependencies.get_document_repository)) -> dict[str, Any]:
+@router.delete("/document/{document_id}", response_model=DocumentDeleteResponse)
+def delete_document(document_id: str, document_repository=Depends(dependencies.get_document_repository)) -> DocumentDeleteResponse:
     deleted = document_repository.delete_document(document_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Document {document_id} not found.")
-    return {"deleted": document_id}
+    return DocumentDeleteResponse(
+        success=True,
+        message="Document deleted",
+        document_id=document_id,
+    )
