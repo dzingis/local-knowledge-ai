@@ -73,14 +73,14 @@ def get_queue(worker: ProcessingWorker = Depends(dependencies.get_processing_wor
 
 @router.get("/stats", response_model=StatsSummary)
 def get_stats(document_repository=Depends(dependencies.get_document_repository)) -> StatsSummary:
-    summary = document_repository.get_statistics()
+    summary = document_repository.get_stats()
     return StatsSummary(
-        documents=summary.documents,
-        chunks=summary.chunks,
-        embeddings=summary.embeddings,
-        conversations=summary.conversations,
-        prompts=summary.prompts,
-        models=summary.models,
+        documents=summary["documents"],
+        chunks=summary["chunks"],
+        embeddings=summary["embeddings"],
+        conversations=summary["conversations"],
+        prompts=summary["prompts"],
+        models=summary["models"],
     )
 
 
