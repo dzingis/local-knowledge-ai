@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
+from backend.chunking.chunk_engine import ChunkEngine, ChunkingConfig, ChunkingResult
 from backend.indexer.index_manager import ChangeType
 from backend.indexer.sql_queue_repository import QueueRepositoryRecord, SqlQueueRepository
 from backend.parsers.parser_models import ParsedDocument
@@ -47,6 +48,7 @@ class WorkerResult:
     error_message: str | None = None
     processed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     parsed_document: ParsedDocument | None = None
+    chunking_result: ChunkingResult | None = None
 
 
 class QueueProcessor(Protocol):
@@ -55,18 +57,21 @@ class QueueProcessor(Protocol):
 
 
 class ParserQueueProcessor:
-    """Default queue processor that routes queued files to the parser service."""
+    """Default queue processor that routes queued files to the parser and chunking services."""
 
-    def __init__(self, parser_service: ParserService) -> None:
+    def __init__(self, parser_service: ParserService, chunk_engine: ChunkEngine | None = None) -> None:
         self._parser_service = parser_service
+        self._chunk_engine = chunk_engine or ChunkEngine(ChunkingConfig())
 
     def __call__(self, record: QueueRepositoryRecord) -> WorkerResult:
         try:
             parsed = self._parser_service.parse_file(record.full_path)
+            chunking_result = self._chunk_engine.chunk_document(parsed)
             return WorkerResult(
                 file_path=record.full_path,
                 outcome=WorkerOutcome.COMPLETED,
                 parsed_document=parsed,
+                chunking_result=chunking_result,
             )
         except Exception as exc:  # pragma: no cover - defensive parser boundary
             return WorkerResult(
