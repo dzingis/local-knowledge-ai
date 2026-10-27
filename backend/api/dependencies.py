@@ -76,6 +76,11 @@ def get_processing_worker() -> ProcessingWorker:
 
 
 @lru_cache(maxsize=1)
+def get_background_worker_service() -> ProcessingWorker:
+    return get_processing_worker()
+
+
+@lru_cache(maxsize=1)
 def get_index_manager() -> IndexManager:
     return IndexManager()
 
