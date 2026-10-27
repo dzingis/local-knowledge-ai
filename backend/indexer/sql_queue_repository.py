@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Iterable, Sequence
 
@@ -186,6 +186,56 @@ class SqlQueueRepository:
     def get_pending(self) -> tuple[QueueRepositoryRecord, ...]:
         return self._load_by_status(QueueStatus.PENDING)
 
+    def get_processing(self) -> tuple[QueueRepositoryRecord, ...]:
+        return self._load_by_status(QueueStatus.PROCESSING)
+
+    def get_stale_processing(self, threshold_minutes: int) -> tuple[QueueRepositoryRecord, ...]:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max(1, threshold_minutes))
+        with self._connect() as connection:
+            cursor = connection.cursor()
+            rows = cursor.execute(
+                """
+                SELECT
+                    FileName,
+                    FullPath,
+                    Extension,
+                    FolderPath,
+                    FileSizeBytes,
+                    ModifiedUtc,
+                    Sha256,
+                    Status,
+                    ChangeType,
+                    EnqueuedAt,
+                    ProcessedAt,
+                    ErrorMessage,
+                    RetryCount
+                FROM AI.IngestionQueue
+                WHERE Status = ?
+                  AND EnqueuedAt <= ?
+                ORDER BY EnqueuedAt ASC;
+                """,
+                (QueueStatus.PROCESSING.value, cutoff),
+            ).fetchall()
+
+        return tuple(
+            QueueRepositoryRecord(
+                file_name=row.FileName,
+                full_path=row.FullPath,
+                extension=row.Extension,
+                folder_path=row.FolderPath,
+                file_size_bytes=int(row.FileSizeBytes),
+                modified_utc=row.ModifiedUtc,
+                sha256=row.Sha256,
+                status=QueueStatus(row.Status),
+                change_type=ChangeType(row.ChangeType),
+                enqueued_at=row.EnqueuedAt,
+                processed_at=row.ProcessedAt,
+                error_message=row.ErrorMessage,
+                retry_count=int(row.RetryCount or 0),
+            )
+            for row in rows
+        )
+
     def mark_processing(self, full_path: str) -> bool:
         return self._update_status(full_path, QueueStatus.PROCESSING)
 
@@ -217,7 +267,8 @@ class SqlQueueRepository:
                 UPDATE AI.IngestionQueue
                 SET Status = ?,
                     ErrorMessage = NULL,
-                    ProcessedAt = NULL
+                    ProcessedAt = NULL,
+                    EnqueuedAt = SYSUTCDATETIME()
                 WHERE FullPath = ?;
                 """,
                 (QueueStatus.PENDING.value, full_path),
@@ -235,7 +286,7 @@ class SqlQueueRepository:
     def snapshot(self) -> QueueRepositoryState:
         return QueueRepositoryState(
             pending=self.get_pending(),
-            processing=self._load_by_status(QueueStatus.PROCESSING),
+            processing=self.get_processing(),
             completed=self._load_by_status(QueueStatus.COMPLETED),
             failed=self._load_by_status(QueueStatus.FAILED),
         )
