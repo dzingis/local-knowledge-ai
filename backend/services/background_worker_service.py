@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 class BackgroundWorkerState:
     running: bool = False
     locked: bool = False
+    paused: bool = False
     iterations: int = 0
     processed: int = 0
     last_result: WorkerResult | None = None
@@ -84,10 +85,29 @@ class BackgroundWorkerService:
         self._stop_event.clear()
         self._state.running = True
         self._state.locked = True
+        self._state.paused = False
         self._state.current_interval_seconds = self._base_interval_seconds
         self._recover_processing_items()
         self._task = asyncio.create_task(self._run_loop())
         logger.info("Background worker service started")
+        return True
+
+    def pause(self) -> bool:
+        if not self._state.running:
+            return False
+        self._state.paused = True
+        self._persist_heartbeat("paused", None)
+        logger.info("Background worker paused")
+        return True
+
+    def resume(self) -> bool:
+        if not self._state.running:
+            return False
+        self._state.paused = False
+        self._state.idle_iterations = 0
+        self._state.current_interval_seconds = self._active_interval_seconds
+        self._persist_heartbeat("running", None)
+        logger.info("Background worker resumed")
         return True
 
     async def stop(self) -> None:
@@ -99,6 +119,7 @@ class BackgroundWorkerService:
                 self._task = None
         self._state.running = False
         self._state.locked = False
+        self._state.paused = False
         self._persist_heartbeat("stopped", None)
         logger.info("Background worker service stopped")
 
@@ -109,6 +130,11 @@ class BackgroundWorkerService:
                 while not self._stop_event.is_set():
                     self._state.iterations += 1
                     try:
+                        if self._state.paused:
+                            self._persist_heartbeat(status="paused", current_file=None)
+                            await asyncio.sleep(self._idle_interval_seconds)
+                            continue
+
                         result = self._worker.run_once()
                         self._state.last_result = result
                         if result is not None:
