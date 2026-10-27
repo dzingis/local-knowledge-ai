@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
+import logging
 from pathlib import Path
+import threading
+import time
 from typing import Protocol
 
 from backend.chunking.chunk_engine import ChunkEngine, ChunkingConfig, ChunkingResult
@@ -13,6 +16,9 @@ from backend.indexer.sql_queue_repository import QueueRepositoryRecord, SqlQueue
 from backend.parsers.parser_models import ParsedDocument
 from backend.parsers.parser_service import ParserService
 from backend.vectorstore.qdrant_repository import QdrantRepository, QdrantUpsertResult
+
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerStatus(str, Enum):
@@ -117,12 +123,18 @@ class ProcessingWorker:
         processor: QueueProcessor | None = None,
         worker_id: str = "worker-1",
         max_retries: int = 3,
+        poll_interval_seconds: float = 1.0,
     ) -> None:
         self._repository = repository
         self._processor = processor or NoOpQueueProcessor()
         self._worker_id = worker_id
         self._max_retries = max_retries
+        self._poll_interval_seconds = max(0.05, poll_interval_seconds)
         self._running = False
+        self._stop_event = threading.Event()
+        self._lifecycle_lock = threading.Lock()
+        self._processing_lock = threading.Lock()
+        self._thread: threading.Thread | None = None
         self._progress = WorkerProgress(
             worker_id=worker_id,
             status=WorkerStatus.IDLE,
@@ -134,69 +146,84 @@ class ProcessingWorker:
         return self._progress
 
     def start(self) -> None:
-        self._running = True
-        self._progress = WorkerProgress(
-            worker_id=self._worker_id,
-            status=WorkerStatus.RUNNING,
-            started_at=datetime.now(timezone.utc),
-        )
+        with self._lifecycle_lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._stop_event.clear()
+            self._running = True
+            self._progress = self._replace_progress(
+                status=WorkerStatus.RUNNING,
+                started_at=datetime.now(timezone.utc),
+                finished_at=None,
+                current_file=None,
+            )
+            self._thread = threading.Thread(
+                target=self._run_loop,
+                name=f"processing-worker-{self._worker_id}",
+                daemon=True,
+            )
+            self._thread.start()
 
     def stop(self) -> None:
+        self._stop_event.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join()
         self._running = False
-        self._progress = WorkerProgress(
-            worker_id=self._worker_id,
+        self._thread = None
+        self._progress = self._replace_progress(
             status=WorkerStatus.STOPPED,
-            started_at=self._progress.started_at,
             finished_at=datetime.now(timezone.utc),
-            processed=self._progress.processed,
-            succeeded=self._progress.succeeded,
-            failed=self._progress.failed,
-            retried=self._progress.retried,
-            last_error=self._progress.last_error,
-            average_duration_ms=self._progress.average_duration_ms,
+            current_file=None,
         )
 
     def run_once(self) -> WorkerResult | None:
         if not self._running:
-            self.start()
+            self._running = True
+            self._progress = self._replace_progress(
+                status=WorkerStatus.RUNNING,
+                started_at=datetime.now(timezone.utc),
+                finished_at=None,
+            )
 
-        pending = self._repository.get_pending()
-        if not pending:
-            return None
+        with self._processing_lock:
+            pending = self._repository.get_pending()
+            if not pending:
+                return None
 
-        record = pending[0]
-        self._progress = self._replace_progress(current_file=record.full_path)
-        self._repository.mark_processing(record.full_path)
+            record = pending[0]
+            self._progress = self._replace_progress(current_file=record.full_path)
+            self._repository.mark_processing(record.full_path)
 
-        try:
-            result = self._processor(record)
-            if result.outcome == WorkerOutcome.COMPLETED:
-                self._repository.mark_completed(record.full_path)
-                self._progress = self._replace_progress(
-                    processed=self._progress.processed + 1,
-                    succeeded=self._progress.succeeded + 1,
-                    current_file=None,
-                )
-            elif result.outcome == WorkerOutcome.RETRY:
-                self._handle_retry(record, result.error_message)
-            else:
-                self._repository.mark_failed(record.full_path, result.error_message)
+            try:
+                result = self._processor(record)
+                if result.outcome == WorkerOutcome.COMPLETED:
+                    self._repository.mark_completed(record.full_path)
+                    self._progress = self._replace_progress(
+                        processed=self._progress.processed + 1,
+                        succeeded=self._progress.succeeded + 1,
+                        current_file=None,
+                    )
+                elif result.outcome == WorkerOutcome.RETRY:
+                    self._handle_retry(record, result.error_message)
+                else:
+                    self._repository.mark_failed(record.full_path, result.error_message)
+                    self._progress = self._replace_progress(
+                        processed=self._progress.processed + 1,
+                        failed=self._progress.failed + 1,
+                        last_error=result.error_message,
+                        current_file=None,
+                    )
+                return result
+            except Exception as exc:  # pragma: no cover - defensive worker guard
+                self._repository.mark_failed(record.full_path, str(exc))
                 self._progress = self._replace_progress(
                     processed=self._progress.processed + 1,
                     failed=self._progress.failed + 1,
-                    last_error=result.error_message,
+                    last_error=str(exc),
                     current_file=None,
                 )
-            return result
-        except Exception as exc:  # pragma: no cover - defensive worker guard
-            self._repository.mark_failed(record.full_path, str(exc))
-            self._progress = self._replace_progress(
-                processed=self._progress.processed + 1,
-                failed=self._progress.failed + 1,
-                last_error=str(exc),
-                current_file=None,
-            )
-            return WorkerResult(file_path=record.full_path, outcome=WorkerOutcome.FAILED, error_message=str(exc))
+                return WorkerResult(file_path=record.full_path, outcome=WorkerOutcome.FAILED, error_message=str(exc))
 
     def run_until_empty(self) -> list[WorkerResult]:
         results: list[WorkerResult] = []
@@ -205,8 +232,21 @@ class ProcessingWorker:
             if result is None:
                 break
             results.append(result)
-        self.stop()
         return results
+
+    def _run_loop(self) -> None:
+        logger.info("Processing worker started: %s", self._worker_id)
+        while not self._stop_event.is_set():
+            try:
+                result = self.run_once()
+            except Exception as exc:
+                logger.exception("Processing worker iteration failed")
+                self._progress = self._replace_progress(last_error=str(exc))
+                result = None
+
+            if result is None:
+                self._stop_event.wait(self._poll_interval_seconds)
+        logger.info("Processing worker stopped: %s", self._worker_id)
 
     def process_path(self, path: str | Path) -> WorkerResult:
         record = next((item for item in self._repository.get_pending() if item.full_path == str(path)), None)
@@ -237,6 +277,4 @@ class ProcessingWorker:
         )
 
     def _replace_progress(self, **updates: object) -> WorkerProgress:
-        data = self._progress.__dict__.copy()
-        data.update(updates)
-        return WorkerProgress(**data)
+        return replace(self._progress, **updates)
