@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
-from backend.indexer.hasher import hash_file
+from backend.indexer.hasher import sha256_file
 from backend.indexer.scanner import FileMetadata, FileScanner, ScanResult
 
 
@@ -133,7 +133,7 @@ class IndexManager:
         return ScanQueueResult(records=records, pending_items=pending_items)
 
     def fingerprint(self, path: Path) -> str:
-        return hash_file(path)
+        return sha256_file(path)
 
     def fingerprints_by_path(self, records: Sequence[PersistentScanRecord]) -> dict[str, str]:
         return {record.full_path: record.sha256 for record in records}

@@ -22,6 +22,8 @@ class EmbeddingRecord:
     vector: tuple[float, ...]
     checksum: str | None = None
     source_path: str | None = None
+    document_title: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +123,6 @@ class EmbeddingService:
         cache_misses = 0
 
         for batch in self._batched(chunk_list, self._batch_size):
-            batch_vectors: list[tuple[float, ...]] = []
             uncached_chunks: list[Chunk] = []
 
             for chunk in batch:
@@ -136,6 +137,15 @@ class EmbeddingService:
                             vector=cached.vector,
                             checksum=cached.checksum,
                             source_path=str(chunk.metadata.source_path),
+                            document_title=chunk.metadata.source_name,
+                            metadata={
+                                "source_type": chunk.metadata.source_type,
+                                "chunk_index": chunk.metadata.chunk_index,
+                                "position": chunk.metadata.position,
+                                "page_number": chunk.metadata.page_number,
+                                "heading": chunk.metadata.heading,
+                                "token_count": chunk.metadata.token_count,
+                            },
                         )
                     )
                     continue
@@ -154,6 +164,15 @@ class EmbeddingService:
                         vector=vector,
                         checksum=checksum,
                         source_path=str(chunk.metadata.source_path),
+                        document_title=chunk.metadata.source_name,
+                        metadata={
+                            "source_type": chunk.metadata.source_type,
+                            "chunk_index": chunk.metadata.chunk_index,
+                            "position": chunk.metadata.position,
+                            "page_number": chunk.metadata.page_number,
+                            "heading": chunk.metadata.heading,
+                            "token_count": chunk.metadata.token_count,
+                        },
                     )
                     records.append(record)
                     self._cache.set(
@@ -164,7 +183,6 @@ class EmbeddingService:
                             vector=vector,
                         )
                     )
-                    batch_vectors.append(vector)
 
         return EmbeddingBatchResult(
             source_name=source_name,
