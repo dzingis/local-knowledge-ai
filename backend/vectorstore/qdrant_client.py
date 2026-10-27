@@ -116,22 +116,14 @@ class QdrantCollectionError(RuntimeError):
 class QdrantPointBuilder:
     @staticmethod
     def from_embedding_record(record: EmbeddingRecord) -> QdrantPoint:
-        metadata = record.chunk.metadata
         payload = QdrantPayload(
-            chunk_id=record.chunk.chunk_id,
-            document_id=str(metadata.source_path),
-            source_path=str(metadata.source_path),
-            source_name=metadata.source_name,
-            source_type=metadata.source_type,
-            title=record.document_title,
-            checksum=record.chunk_checksum,
-            metadata={
-                "chunk_index": metadata.chunk_index,
-                "position": metadata.position,
-                "page_number": metadata.page_number,
-                "heading": metadata.heading,
-                "token_count": metadata.token_count,
-                **record.metadata,
-            },
+            chunk_id=record.chunk_id,
+            document_id=record.source_path or record.chunk_id,
+            source_path=record.source_path or record.chunk_id,
+            source_name=record.document_title or "",
+            source_type=str(record.metadata.get("source_type", "")),
+            title=record.document_title or "",
+            checksum=record.checksum,
+            metadata=dict(record.metadata),
         )
-        return QdrantPoint(id=record.chunk.chunk_id, vector=record.vector, payload=payload)
+        return QdrantPoint(id=record.chunk_id, vector=record.vector, payload=payload)
