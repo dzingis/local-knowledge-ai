@@ -9,7 +9,7 @@ import pytest
 
 from backend.indexer.index_manager import ChangeType
 from backend.indexer.sql_queue_repository import QueueRepositoryRecord
-from backend.workers.processing_worker import ProcessingWorker, WorkerOutcome
+from backend.workers.processing_worker import ProcessingWorker, WorkerOutcome, WorkerStatus
 
 
 @dataclass
@@ -35,7 +35,7 @@ class InMemoryQueueRepository:
         return len(new_items)
 
     def get_pending(self) -> tuple[QueueRepositoryRecord, ...]:
-        return tuple(record for record in self.records if record.status == ChangeType.INSERTED)
+        return tuple(record for record in self.records if record.change_type == ChangeType.INSERTED)
 
     def mark_processing(self, full_path: str) -> bool:
         self.processing.append(full_path)
@@ -91,3 +91,8 @@ def test_end_to_end_ingestion_pipeline(tmp_path: Path) -> None:
     assert str(sample_file) in queue_repository.processing
     assert str(sample_file) in queue_repository.completed
     assert str(sample_file) not in queue_repository.failed
+    assert worker.progress.status == WorkerStatus.RUNNING
+    assert worker.progress.processed == 1
+    assert worker.progress.succeeded == 1
+    assert worker.progress.failed == 0
+    assert worker.progress.retried == 0
