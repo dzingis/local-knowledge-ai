@@ -12,6 +12,7 @@ from backend.indexer.index_manager import ChangeType
 from backend.indexer.sql_queue_repository import QueueRepositoryRecord, SqlQueueRepository
 from backend.parsers.parser_models import ParsedDocument
 from backend.parsers.parser_service import ParserService
+from backend.vectorstore.qdrant_repository import QdrantRepository, QdrantUpsertResult
 
 
 class WorkerStatus(str, Enum):
@@ -51,6 +52,7 @@ class WorkerResult:
     parsed_document: ParsedDocument | None = None
     chunking_result: ChunkingResult | None = None
     embedding_result: EmbeddingBatchResult | None = None
+    qdrant_result: QdrantUpsertResult | None = None
 
 
 class QueueProcessor(Protocol):
@@ -59,31 +61,37 @@ class QueueProcessor(Protocol):
 
 
 class ParserQueueProcessor:
-    """Default queue processor that routes queued files to the parser, chunking, and embedding services."""
+    """Default queue processor that routes queued files to parser, chunking, embedding, and vector storage."""
 
     def __init__(
         self,
         parser_service: ParserService,
         chunk_engine: ChunkEngine | None = None,
         embedding_service: EmbeddingService | None = None,
+        qdrant_repository: QdrantRepository | None = None,
     ) -> None:
         self._parser_service = parser_service
         self._chunk_engine = chunk_engine or ChunkEngine(ChunkingConfig())
         self._embedding_service = embedding_service
+        self._qdrant_repository = qdrant_repository
 
     def __call__(self, record: QueueRepositoryRecord) -> WorkerResult:
         try:
             parsed = self._parser_service.parse_file(record.full_path)
             chunking_result = self._chunk_engine.chunk_document(parsed)
             embedding_result = None
+            qdrant_result = None
             if self._embedding_service is not None and chunking_result.chunks:
                 embedding_result = self._embedding_service.embed_chunks(chunking_result.chunks)
+                if self._qdrant_repository is not None and embedding_result.records:
+                    qdrant_result = self._qdrant_repository.upsert_embedding_records(embedding_result.records)
             return WorkerResult(
                 file_path=record.full_path,
                 outcome=WorkerOutcome.COMPLETED,
                 parsed_document=parsed,
                 chunking_result=chunking_result,
                 embedding_result=embedding_result,
+                qdrant_result=qdrant_result,
             )
         except Exception as exc:  # pragma: no cover - defensive parser boundary
             return WorkerResult(
