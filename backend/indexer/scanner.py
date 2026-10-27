@@ -28,11 +28,64 @@ class FileMetadata:
     sha256: str
     is_supported: bool
 
+    @property
+    def full_path(self) -> Path:
+        return self.path
+
+    @property
+    def file_name(self) -> str:
+        return self.name
+
+    @property
+    def file_size_bytes(self) -> int:
+        return self.size_bytes
+
+    @property
+    def folder_path(self) -> Path:
+        return self.path.parent
+
 
 @dataclass(frozen=True, slots=True)
 class ScanResult:
     root: Path
     files: tuple[FileMetadata, ...]
+
+
+class FileScanner:
+    """Compatibility wrapper used by IndexManager."""
+
+    def __init__(self, supported_extensions: Iterable[str] | None = None) -> None:
+        self.supported_extensions = {
+            ext.lower() for ext in (supported_extensions or SUPPORTED_EXTENSIONS)
+        }
+
+    def scan(self, roots: Iterable[Path]) -> ScanResult:
+        collected: list[FileMetadata] = []
+        last_root: Path | None = None
+
+        for root in roots:
+            root_path = Path(root).expanduser().resolve()
+            last_root = root_path
+            for path in root_path.rglob("*"):
+                if not path.is_file():
+                    continue
+                if path.suffix.lower() not in self.supported_extensions:
+                    continue
+                collected.append(self.collect_metadata(path))
+
+        return ScanResult(root=last_root or Path.cwd(), files=tuple(collected))
+
+    def collect_metadata(self, path: Path) -> FileMetadata:
+        stat_result = path.stat()
+        return FileMetadata(
+            path=path.resolve(),
+            name=path.name,
+            extension=path.suffix.lower(),
+            size_bytes=stat_result.st_size,
+            modified_utc=stat_result.st_mtime,
+            sha256=sha256_file(path),
+            is_supported=True,
+        )
 
 
 def is_supported_file(path: Path) -> bool:
@@ -46,19 +99,10 @@ def iter_supported_files(root: Path) -> Iterable[Path]:
 
 
 def collect_metadata(path: Path) -> FileMetadata:
-    stat_result = path.stat()
-    return FileMetadata(
-        path=path.resolve(),
-        name=path.name,
-        extension=path.suffix.lower(),
-        size_bytes=stat_result.st_size,
-        modified_utc=stat_result.st_mtime,
-        sha256=sha256_file(path),
-        is_supported=True,
-    )
+    return FileScanner().collect_metadata(path)
 
 
 def scan_folder(root: str | Path) -> ScanResult:
     root_path = Path(root).expanduser().resolve()
-    files = tuple(collect_metadata(path) for path in iter_supported_files(root_path))
-    return ScanResult(root=root_path, files=files)
+    scanner = FileScanner()
+    return scanner.scan([root_path])
