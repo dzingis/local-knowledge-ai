@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pymupdf
+
 from backend.parsers.parser_models import ParsedDocument, ParsedObjectType, ParserKind, ParserReference, ParserSummary
 
 
@@ -58,24 +60,20 @@ class PdfParser:
 
     def parse_file(self, path: str | Path) -> PdfParseResult:
         source = Path(path)
-        try:
-            import fitz  # type: ignore
-        except Exception:
-            return self.parse_text(source.read_text(encoding="utf-8", errors="ignore"), source_path=source)
+        with pymupdf.open(source) as doc:
+            pages: list[PdfPage] = []
+            texts: list[str] = []
+            for index, page in enumerate(doc, start=1):
+                page_text = page.get_text("text").strip()
+                pages.append(PdfPage(page_number=index, text=page_text))
+                if page_text:
+                    texts.append(page_text)
+            metadata = {
+                "page_count": len(pages),
+                "file_size": source.stat().st_size if source.exists() else None,
+                "title": doc.metadata.get("title") if getattr(doc, "metadata", None) else None,
+            }
 
-        doc = fitz.open(source)
-        pages: list[PdfPage] = []
-        texts: list[str] = []
-        for index, page in enumerate(doc, start=1):
-            page_text = page.get_text("text").strip()
-            pages.append(PdfPage(page_number=index, text=page_text))
-            if page_text:
-                texts.append(page_text)
-        metadata = {
-            "page_count": len(pages),
-            "file_size": source.stat().st_size if source.exists() else None,
-            "title": doc.metadata.get("title") if getattr(doc, "metadata", None) else None,
-        }
         return PdfParseResult(
             source_path=source,
             pages=tuple(pages),
