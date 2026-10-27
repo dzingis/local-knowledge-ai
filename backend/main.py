@@ -1,9 +1,12 @@
-<<<<<<< HEAD
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from backend.api.dependencies import get_background_worker_service
 from backend.api.health import router as health_router
+from backend.api.routes import router as api_router
 from backend.config.logging import configure_logging
 
 configure_logging()
@@ -12,51 +15,54 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Application startup and shutdown.
-    Services (SQL Server, Qdrant, Ollama) will be initialized here
-    in later milestones.
+    Application startup / shutdown.
+
+    Initializes all background services required by
+    Local Knowledge AI.
     """
 
-    print("Local Knowledge AI starting...")
+    print("======================================")
+    print("Starting Local Knowledge AI...")
+    print("======================================")
 
-    yield
+    background_worker = get_background_worker_service()
 
-    print("Local Knowledge AI stopped.")
+    background_worker.start()
+
+    try:
+        yield
+
+    finally:
+        print("Stopping Local Knowledge AI...")
+
+        await background_worker.stop()
+
+        print("Local Knowledge AI stopped.")
 
 
 app = FastAPI(
     title="Local Knowledge AI",
     version="0.1.0",
+    description="REST API for Local Knowledge AI",
     lifespan=lifespan,
 )
 
+#
+# Routers
+#
+
 app.include_router(health_router)
+app.include_router(api_router)
 
 
-=======
-from fastapi import FastAPI
+#
+# Root endpoint
+#
 
-app = FastAPI(
-    title="Local Knowledge AI",
-    version="0.1.0"
-)
-
->>>>>>> 39be1ee (Complete Milestone 1 infrastructure)
-@app.get("/")
+@app.get("/", tags=["system"])
 async def root():
     return {
         "application": "Local Knowledge AI",
-<<<<<<< HEAD
         "version": "0.1.0",
         "status": "running",
     }
-=======
-        "status": "running"
-    }
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "healthy"
-    }
->>>>>>> 39be1ee (Complete Milestone 1 infrastructure)

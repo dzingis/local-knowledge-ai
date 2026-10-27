@@ -1,34 +1,85 @@
-fastapi
-uvicorn
-sqlalchemy
-pyodbc
-pydantic
-python-dotenv
+# ============================================
+# Local Knowledge AI
+# Production Requirements
+# Python 3.12+
+# ============================================
 
-langchain
+# ----------------------------
+# API
+# ----------------------------
+fastapi>=0.116.0
+uvicorn[standard]>=0.35.0
+starlette>=0.47.0
+pydantic>=2.11.0
+pydantic-settings>=2.10.0
 
-langchain-community
+# ----------------------------
+# Database
+# ----------------------------
+sqlalchemy>=2.0.43
+pyodbc>=5.2.0
+python-dotenv>=1.1.1
 
-qdrant-client
+# ----------------------------
+# JSON
+# ----------------------------
+orjson>=3.11.3
 
-sentence-transformers
+# ----------------------------
+# AI / LangChain
+# ----------------------------
+langchain>=0.3.27
+langchain-community>=0.3.29
+langchain-core>=0.3.75
 
-pymupdf
+# ----------------------------
+# Embeddings
+# ----------------------------
+sentence-transformers>=5.1.0
+transformers>=4.56.0
+torch>=2.8.0
 
-python-docx
+# ----------------------------
+# Vector Database
+# ----------------------------
+qdrant-client>=1.15.1
 
-markdown
+# ----------------------------
+# Documents
+# ----------------------------
+PyMuPDF>=1.26.4
+python-docx>=1.2.0
+markdown>=3.8.2
+beautifulsoup4>=4.13.5
 
-beautifulsoup4
+# ----------------------------
+# Utilities
+# ----------------------------
+watchdog>=6.0.0
+networkx>=3.5
+requests>=2.32.5
+httpx>=0.28.1
+typing-extensions>=4.15.0
 
-watchdog
+# ----------------------------
+# Data Processing
+# ----------------------------
+numpy>=2.3.3
+pandas>=2.3.2
 
-networkx
+# ----------------------------
+# Logging
+# ----------------------------
+rich>=14.1.0
 
-<<<<<<< HEAD
-orjson==3.11.3
-=======
-numpy
+# ----------------------------
+# Testing
+# ----------------------------
+pytest>=8.4.2
+pytest-asyncio>=1.2.0
 
-pandas
->>>>>>> 39be1ee (Complete Milestone 1 infrastructure)
+# ----------------------------
+# Optional (recommended)
+# ----------------------------
+psutil>=7.0.0
+tenacity>=9.1.2
