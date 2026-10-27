@@ -26,6 +26,7 @@ class BackgroundWorkerState:
     last_result: WorkerResult | None = None
     last_heartbeat_at: datetime | None = None
     recovered_items: int = 0
+    watchdog_recovered_items: int = 0
     idle_iterations: int = 0
     current_interval_seconds: float = 0.0
 
@@ -49,6 +50,8 @@ class BackgroundWorkerService:
         idle_interval_seconds: float = 10.0,
         active_interval_seconds: float = 0.5,
         max_backoff_seconds: float = 30.0,
+        stale_processing_threshold_minutes: int = 30,
+        watchdog_check_every_iterations: int = 5,
     ) -> None:
         self._worker = worker
         self._queue_repository = queue_repository
@@ -57,6 +60,8 @@ class BackgroundWorkerService:
         self._idle_interval_seconds = max(self._base_interval_seconds, idle_interval_seconds)
         self._active_interval_seconds = max(0.1, min(active_interval_seconds, self._base_interval_seconds))
         self._max_backoff_seconds = max(self._idle_interval_seconds, max_backoff_seconds)
+        self._stale_processing_threshold_minutes = max(1, stale_processing_threshold_minutes)
+        self._watchdog_check_every_iterations = max(1, watchdog_check_every_iterations)
         self._heartbeat_worker_id = heartbeat_worker_id
         self._task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
@@ -132,8 +137,15 @@ class BackgroundWorkerService:
                     try:
                         if self._state.paused:
                             self._persist_heartbeat(status="paused", current_file=None)
-                            await asyncio.sleep(self._idle_interval_seconds)
+                            await self._sleep_with_stop(self._idle_interval_seconds)
                             continue
+
+                        if self._should_run_watchdog():
+                            recovered = self._run_watchdog()
+                            self._state.watchdog_recovered_items += recovered
+                            if recovered:
+                                self._state.idle_iterations = 0
+                                logger.warning("Watchdog recovered %s stale processing queue item(s)", recovered)
 
                         result = self._worker.run_once()
                         self._state.last_result = result
@@ -159,12 +171,35 @@ class BackgroundWorkerService:
                         )
                         self._persist_heartbeat(status="error", current_file=None)
 
-                    await asyncio.sleep(self._state.current_interval_seconds)
+                    await self._sleep_with_stop(self._state.current_interval_seconds)
             finally:
                 self._state.running = False
                 self._state.locked = False
                 self._persist_heartbeat("stopped", None)
                 logger.info("Background worker loop exited")
+
+    def _should_run_watchdog(self) -> bool:
+        return self._queue_repository is not None and self._state.iterations % self._watchdog_check_every_iterations == 0
+
+    def _run_watchdog(self) -> int:
+        if self._queue_repository is None:
+            return 0
+
+        recovered = 0
+        try:
+            stale_records = self._queue_repository.get_stale_processing(self._stale_processing_threshold_minutes)
+            for record in stale_records:
+                if self._queue_repository.retry(record.full_path):
+                    recovered += 1
+        except Exception:
+            logger.exception("Failed to recover stale processing queue items")
+        return recovered
+
+    async def _sleep_with_stop(self, seconds: float) -> None:
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            return
 
     def _next_backoff_interval(self, idle_iterations: int, current_interval: float) -> float:
         if idle_iterations <= 0:
