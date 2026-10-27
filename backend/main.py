@@ -1,10 +1,13 @@
-<<<<<<< HEAD
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from backend.api.health import router as health_router
+from backend.api.routes import router as api_router
 from backend.config.logging import configure_logging
+from backend.api.dependencies import get_background_worker_service
 
 configure_logging()
 
@@ -19,9 +22,14 @@ async def lifespan(app: FastAPI):
 
     print("Local Knowledge AI starting...")
 
-    yield
+    background_worker = get_background_worker_service()
+    background_worker.start()
 
-    print("Local Knowledge AI stopped.")
+    try:
+        yield
+    finally:
+        await background_worker.stop()
+        print("Local Knowledge AI stopped.")
 
 
 app = FastAPI(
@@ -31,32 +39,13 @@ app = FastAPI(
 )
 
 app.include_router(health_router)
+app.include_router(api_router)
 
 
-=======
-from fastapi import FastAPI
-
-app = FastAPI(
-    title="Local Knowledge AI",
-    version="0.1.0"
-)
-
->>>>>>> 39be1ee (Complete Milestone 1 infrastructure)
 @app.get("/")
 async def root():
     return {
         "application": "Local Knowledge AI",
-<<<<<<< HEAD
         "version": "0.1.0",
         "status": "running",
     }
-=======
-        "status": "running"
-    }
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "healthy"
-    }
->>>>>>> 39be1ee (Complete Milestone 1 infrastructure)
