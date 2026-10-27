@@ -62,6 +62,18 @@ class DocumentStoreResult:
     qdrant_result: QdrantSearchResult | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class DocumentDeleteResult:
+    document_id: str
+    source_path: str
+    documents_deleted: int
+    chunks_deleted: int
+    embeddings_deleted: int
+    qdrant_deleted: int
+    success: bool
+    deleted_at: datetime
+
+
 class DocumentRepository:
     """SQL Server-backed repository for documents, chunks, and embeddings."""
 
@@ -167,14 +179,69 @@ class DocumentRepository:
             return None
         return self._row_to_document(row)
 
-    def delete_document(self, document_id: str) -> bool:
+    def delete_document(self, document_id: str) -> DocumentDeleteResult:
+        deleted_at = datetime.now(timezone.utc)
+        document = self.get_document(document_id)
+        if document is None:
+            return DocumentDeleteResult(
+                document_id=document_id,
+                source_path=document_id,
+                documents_deleted=0,
+                chunks_deleted=0,
+                embeddings_deleted=0,
+                qdrant_deleted=0,
+                success=False,
+                deleted_at=deleted_at,
+            )
+
         with self._connect() as connection:
-            cursor = connection.cursor()
-            cursor.execute("DELETE FROM AI.ChunkEmbeddings WHERE ChunkId IN (SELECT ChunkId FROM AI.DocumentChunks WHERE DocumentId = ?);", (document_id,))
-            cursor.execute("DELETE FROM AI.DocumentChunks WHERE DocumentId = ?;", (document_id,))
-            cursor.execute("DELETE FROM AI.Documents WHERE DocumentId = ?;", (document_id,))
-            connection.commit()
-            return cursor.rowcount > 0
+            try:
+                cursor = connection.cursor()
+                chunk_ids = [row.ChunkId for row in cursor.execute(
+                    "SELECT ChunkId FROM AI.DocumentChunks WHERE DocumentId = ?;",
+                    (document_id,),
+                ).fetchall()]
+
+                embeddings_deleted = cursor.execute(
+                    """
+                    DELETE FROM AI.ChunkEmbeddings
+                    WHERE ChunkId IN (
+                        SELECT ChunkId
+                        FROM AI.DocumentChunks
+                        WHERE DocumentId = ?
+                    );
+                    """,
+                    (document_id,),
+                ).rowcount
+
+                chunks_deleted = cursor.execute(
+                    "DELETE FROM AI.DocumentChunks WHERE DocumentId = ?;",
+                    (document_id,),
+                ).rowcount
+
+                documents_deleted = cursor.execute(
+                    "DELETE FROM AI.Documents WHERE DocumentId = ?;",
+                    (document_id,),
+                ).rowcount
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+        qdrant_deleted = 0
+        if self._qdrant_repository is not None and chunk_ids:
+            qdrant_deleted = self._qdrant_repository.delete_embeddings(chunk_ids).deleted_count
+
+        return DocumentDeleteResult(
+            document_id=document_id,
+            source_path=document.source_path,
+            documents_deleted=documents_deleted,
+            chunks_deleted=chunks_deleted,
+            embeddings_deleted=embeddings_deleted,
+            qdrant_deleted=qdrant_deleted,
+            success=bool(documents_deleted),
+            deleted_at=deleted_at,
+        )
 
     def get_stats(self) -> dict[str, int]:
         with self._connect() as connection:
