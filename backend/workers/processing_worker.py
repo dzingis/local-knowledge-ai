@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 from backend.indexer.index_manager import ChangeType
 from backend.indexer.sql_queue_repository import QueueRepositoryRecord, SqlQueueRepository
+from backend.parsers.parser_models import ParsedDocument
+from backend.parsers.parser_service import ParserService
 
 
 class WorkerStatus(str, Enum):
@@ -44,6 +46,7 @@ class WorkerResult:
     outcome: WorkerOutcome
     error_message: str | None = None
     processed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    parsed_document: ParsedDocument | None = None
 
 
 class QueueProcessor(Protocol):
@@ -51,9 +54,29 @@ class QueueProcessor(Protocol):
         ...
 
 
-class NoOpQueueProcessor:
-    """Default processor used until parser/chunking/embedding services are wired in."""
+class ParserQueueProcessor:
+    """Default queue processor that routes queued files to the parser service."""
 
+    def __init__(self, parser_service: ParserService) -> None:
+        self._parser_service = parser_service
+
+    def __call__(self, record: QueueRepositoryRecord) -> WorkerResult:
+        try:
+            parsed = self._parser_service.parse_file(record.full_path)
+            return WorkerResult(
+                file_path=record.full_path,
+                outcome=WorkerOutcome.COMPLETED,
+                parsed_document=parsed,
+            )
+        except Exception as exc:  # pragma: no cover - defensive parser boundary
+            return WorkerResult(
+                file_path=record.full_path,
+                outcome=WorkerOutcome.FAILED,
+                error_message=str(exc),
+            )
+
+
+class NoOpQueueProcessor:
     def __call__(self, record: QueueRepositoryRecord) -> WorkerResult:
         if record.change_type == ChangeType.DELETED:
             return WorkerResult(file_path=record.full_path, outcome=WorkerOutcome.COMPLETED)
@@ -69,13 +92,11 @@ class ProcessingWorker:
         processor: QueueProcessor | None = None,
         worker_id: str = "worker-1",
         max_retries: int = 3,
-        logger: object | None = None,
     ) -> None:
         self._repository = repository
         self._processor = processor or NoOpQueueProcessor()
         self._worker_id = worker_id
         self._max_retries = max_retries
-        self._logger = logger
         self._running = False
         self._progress = WorkerProgress(
             worker_id=worker_id,
@@ -89,22 +110,26 @@ class ProcessingWorker:
 
     def start(self) -> None:
         self._running = True
-        self._progress = replace(
-            self._progress,
+        self._progress = WorkerProgress(
+            worker_id=self._worker_id,
             status=WorkerStatus.RUNNING,
             started_at=datetime.now(timezone.utc),
-            finished_at=None,
         )
-        self._log("Worker started", worker_id=self._worker_id)
 
     def stop(self) -> None:
         self._running = False
-        self._progress = replace(
-            self._progress,
+        self._progress = WorkerProgress(
+            worker_id=self._worker_id,
             status=WorkerStatus.STOPPED,
+            started_at=self._progress.started_at,
             finished_at=datetime.now(timezone.utc),
+            processed=self._progress.processed,
+            succeeded=self._progress.succeeded,
+            failed=self._progress.failed,
+            retried=self._progress.retried,
+            last_error=self._progress.last_error,
+            average_duration_ms=self._progress.average_duration_ms,
         )
-        self._log("Worker stopped", worker_id=self._worker_id)
 
     def run_once(self) -> WorkerResult | None:
         if not self._running:
@@ -112,86 +137,40 @@ class ProcessingWorker:
 
         pending = self._repository.get_pending()
         if not pending:
-            self._log("No pending queue items")
             return None
 
         record = pending[0]
-        self._progress = self._with_updates(current_file=record.full_path)
-        self._log("Picked queue item", file_path=record.full_path)
+        self._progress = self._replace_progress(current_file=record.full_path)
+        self._repository.mark_processing(record.full_path)
 
-        if not self._repository.mark_processing(record.full_path):
-            self._log("Failed to mark item as processing", file_path=record.full_path)
-            return WorkerResult(
-                file_path=record.full_path,
-                outcome=WorkerOutcome.FAILED,
-                error_message="Failed to mark item as processing",
-            )
-
-        started_at = datetime.now(timezone.utc)
         try:
             result = self._processor(record)
-            duration_ms = self._elapsed_ms(started_at)
-
             if result.outcome == WorkerOutcome.COMPLETED:
                 self._repository.mark_completed(record.full_path)
-                self._progress = self._with_updates(
+                self._progress = self._replace_progress(
                     processed=self._progress.processed + 1,
                     succeeded=self._progress.succeeded + 1,
                     current_file=None,
-                    average_duration_ms=self._next_average(duration_ms),
                 )
-                self._log("Queue item completed", file_path=record.full_path, duration_ms=duration_ms)
-                return result
-
-            if result.outcome == WorkerOutcome.RETRY:
+            elif result.outcome == WorkerOutcome.RETRY:
+                self._handle_retry(record, result.error_message)
+            else:
                 self._repository.mark_failed(record.full_path, result.error_message)
-                if record.retry_count < self._max_retries:
-                    self._repository.retry(record.full_path)
-                    self._progress = self._with_updates(
-                        processed=self._progress.processed + 1,
-                        retried=self._progress.retried + 1,
-                        current_file=None,
-                        last_error=result.error_message,
-                        average_duration_ms=self._next_average(duration_ms),
-                    )
-                    self._log("Queue item requeued", file_path=record.full_path, duration_ms=duration_ms)
-                else:
-                    self._progress = self._with_updates(
-                        processed=self._progress.processed + 1,
-                        failed=self._progress.failed + 1,
-                        current_file=None,
-                        last_error=result.error_message or "Retry limit exceeded",
-                        average_duration_ms=self._next_average(duration_ms),
-                    )
-                    self._log("Retry limit exceeded", file_path=record.full_path, duration_ms=duration_ms)
-                    return WorkerResult(
-                        file_path=record.full_path,
-                        outcome=WorkerOutcome.FAILED,
-                        error_message=result.error_message or "Retry limit exceeded",
-                    )
-                return result
-
-            self._repository.mark_failed(record.full_path, result.error_message)
-            self._progress = self._with_updates(
-                processed=self._progress.processed + 1,
-                failed=self._progress.failed + 1,
-                current_file=None,
-                last_error=result.error_message,
-                average_duration_ms=self._next_average(duration_ms),
-            )
-            self._log("Queue item failed", file_path=record.full_path, error=result.error_message)
+                self._progress = self._replace_progress(
+                    processed=self._progress.processed + 1,
+                    failed=self._progress.failed + 1,
+                    last_error=result.error_message,
+                    current_file=None,
+                )
             return result
-
         except Exception as exc:  # pragma: no cover - defensive worker guard
             self._repository.mark_failed(record.full_path, str(exc))
-            self._progress = self._with_updates(
+            self._progress = self._replace_progress(
                 processed=self._progress.processed + 1,
                 failed=self._progress.failed + 1,
-                current_file=None,
                 last_error=str(exc),
-                average_duration_ms=self._next_average(self._elapsed_ms(started_at)),
+                current_file=None,
             )
-            self._log("Worker exception", file_path=record.full_path, error=str(exc))
             return WorkerResult(file_path=record.full_path, outcome=WorkerOutcome.FAILED, error_message=str(exc))
 
     def run_until_empty(self) -> list[WorkerResult]:
@@ -205,36 +184,34 @@ class ProcessingWorker:
         return results
 
     def process_path(self, path: str | Path) -> WorkerResult:
-        target_path = str(path)
-        record = next((item for item in self._repository.get_pending() if item.full_path == target_path), None)
+        record = next((item for item in self._repository.get_pending() if item.full_path == str(path)), None)
         if record is None:
-            return WorkerResult(file_path=target_path, outcome=WorkerOutcome.FAILED, error_message="Path not queued")
-
-        if not self._repository.mark_processing(record.full_path):
-            return WorkerResult(
-                file_path=record.full_path,
-                outcome=WorkerOutcome.FAILED,
-                error_message="Failed to mark item as processing",
-            )
-
-        self._log("Processing explicit path", file_path=record.full_path)
+            return WorkerResult(file_path=str(path), outcome=WorkerOutcome.FAILED, error_message="Path not queued")
+        self._repository.mark_processing(record.full_path)
         return self._processor(record)
 
-    def _with_updates(self, **updates: object) -> WorkerProgress:
-        return replace(self._progress, **updates)
-
-    def _next_average(self, duration_ms: float) -> float:
-        if self._progress.processed <= 0:
-            return duration_ms
-        total_previous = self._progress.average_duration_ms * self._progress.processed
-        return (total_previous + duration_ms) / (self._progress.processed + 1)
-
-    def _elapsed_ms(self, started_at: datetime) -> float:
-        return (datetime.now(timezone.utc) - started_at).total_seconds() * 1000.0
-
-    def _log(self, message: str, **fields: object) -> None:
-        if self._logger is None:
+    def _handle_retry(self, record: QueueRepositoryRecord, error_message: str | None) -> None:
+        should_retry = record.retry_count < self._max_retries
+        if should_retry:
+            self._repository.mark_failed(record.full_path, error_message)
+            self._repository.retry(record.full_path)
+            self._progress = self._replace_progress(
+                processed=self._progress.processed + 1,
+                retried=self._progress.retried + 1,
+                last_error=error_message,
+                current_file=None,
+            )
             return
-        log_method = getattr(self._logger, "info", None)
-        if callable(log_method):
-            log_method("%s | %s", message, fields)
+
+        self._repository.mark_failed(record.full_path, error_message)
+        self._progress = self._replace_progress(
+            processed=self._progress.processed + 1,
+            failed=self._progress.failed + 1,
+            last_error=error_message,
+            current_file=None,
+        )
+
+    def _replace_progress(self, **updates: object) -> WorkerProgress:
+        data = self._progress.__dict__.copy()
+        data.update(updates)
+        return WorkerProgress(**data)
