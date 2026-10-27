@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 import re
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Iterable, Sequence
+
+from backend.parsers.parser_models import (
+    ParsedDocument,
+    ParsedObjectType,
+    ParserKind,
+    ParserReference,
+)
 
 
 class SqlObjectType(str, Enum):
@@ -36,6 +43,36 @@ class SqlParseResult:
     created_objects: tuple[SqlReference, ...] = ()
     line_count: int = 0
 
+    def to_parsed_document(self) -> ParsedDocument:
+        metadata = {
+            "schema_name": self.schema_name,
+            "object_name": self.object_name,
+            "object_type": self.object_type.value,
+            "line_count": self.line_count,
+            "parser": ParserKind.SQL.value,
+            "source_path": str(self.source_path),
+        }
+        references = tuple(
+            ParserReference(name=reference.name, schema=reference.schema, kind=reference.kind)
+            for reference in self.referenced_objects
+        )
+        title = self.object_name if self.schema_name is None else f"{self.schema_name}.{self.object_name}"
+        return ParsedDocument(
+            source_path=self.source_path,
+            parser_kind=ParserKind.SQL,
+            object_type=ParsedObjectType(self.object_type.value)
+            if self.object_type.value in ParsedObjectType._value2member_map_
+            else ParsedObjectType.UNKNOWN,
+            title=title,
+            text=self.normalized_sql,
+            metadata=metadata,
+            references=references,
+            checksum=None,
+            language="sql",
+            line_count=self.line_count,
+            character_count=len(self.normalized_sql),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SqlParseSummary:
@@ -47,12 +84,48 @@ class SqlParser:
     """Parse SQL Server scripts into a structured, search-ready representation."""
 
     CREATE_PATTERNS: tuple[tuple[SqlObjectType, re.Pattern[str]], ...] = (
-        (SqlObjectType.TABLE, re.compile(r"\bCREATE\s+TABLE\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)", re.IGNORECASE | re.MULTILINE)),
-        (SqlObjectType.VIEW, re.compile(r"\bCREATE\s+VIEW\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)", re.IGNORECASE | re.MULTILINE)),
-        (SqlObjectType.PROCEDURE, re.compile(r"\bCREATE\s+(?:PROCEDURE|PROC)\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)", re.IGNORECASE | re.MULTILINE)),
-        (SqlObjectType.FUNCTION, re.compile(r"\bCREATE\s+FUNCTION\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)", re.IGNORECASE | re.MULTILINE)),
-        (SqlObjectType.TRIGGER, re.compile(r"\bCREATE\s+TRIGGER\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)", re.IGNORECASE | re.MULTILINE)),
-        (SqlObjectType.INDEX, re.compile(r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?P<name>(?:\[[^\]]+\]|\w+))", re.IGNORECASE | re.MULTILINE)),
+        (
+            SqlObjectType.TABLE,
+            re.compile(
+                r"\bCREATE\s+TABLE\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)",
+                re.IGNORECASE | re.MULTILINE,
+            ),
+        ),
+        (
+            SqlObjectType.VIEW,
+            re.compile(
+                r"\bCREATE\s+VIEW\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)",
+                re.IGNORECASE | re.MULTILINE,
+            ),
+        ),
+        (
+            SqlObjectType.PROCEDURE,
+            re.compile(
+                r"\bCREATE\s+(?:PROCEDURE|PROC)\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)",
+                re.IGNORECASE | re.MULTILINE,
+            ),
+        ),
+        (
+            SqlObjectType.FUNCTION,
+            re.compile(
+                r"\bCREATE\s+FUNCTION\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)",
+                re.IGNORECASE | re.MULTILINE,
+            ),
+        ),
+        (
+            SqlObjectType.TRIGGER,
+            re.compile(
+                r"\bCREATE\s+TRIGGER\s+(?P<name>(?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))?)",
+                re.IGNORECASE | re.MULTILINE,
+            ),
+        ),
+        (
+            SqlObjectType.INDEX,
+            re.compile(
+                r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?P<name>(?:\[[^\]]+\]|\w+))",
+                re.IGNORECASE | re.MULTILINE,
+            ),
+        ),
     )
 
     REFERENCE_PATTERN = re.compile(
