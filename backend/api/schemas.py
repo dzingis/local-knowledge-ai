@@ -114,3 +114,12 @@ class OperationResponse(BaseModel):
     message: str
     path: str | None = None
     document_id: str | None = None
+
+
+class DocumentDeleteResponse(BaseModel):
+    success: bool
+    message: str
+    document_id: str | None = None
+    chunks_deleted: int = 0
+    embeddings_deleted: int = 0
+    vectors_deleted: int = 0
