@@ -4,8 +4,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable, Protocol, Sequence
 
+import requests
+
 from backend.chunking.chunk_engine import Chunk, ChunkingResult
-from backend.embeddings.embedding_cache import CachedEmbedding, EmbeddingCache, InMemoryEmbeddingCache
+from backend.embeddings.embedding_cache import EmbeddingCache, InMemoryEmbeddingCache
+from backend.config.settings import get_settings
 
 
 class EmbeddingStatus(str, Enum):
@@ -52,30 +55,36 @@ class EmbeddingProvider(Protocol):
 
 
 class OllamaEmbeddingProvider:
-    """Minimal Ollama embedding provider abstraction.
+    """Generate vectors using Ollama's embedding API."""
 
-    The implementation intentionally avoids a hard dependency on a specific HTTP
-    client so it can be wired to the project’s preferred transport later.
-    """
-
-    def __init__(self, model_name: str = "nomic-embed-text") -> None:
-        self.model_name = model_name
+    def __init__(
+        self,
+        model_name: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        settings = get_settings()
+        self.model_name = model_name or settings.ollama_embedding_model
+        self._base_url = base_url or f"http://{settings.ollama_host}:{settings.ollama_port}"
+        self._timeout_seconds = timeout_seconds or settings.ollama_timeout_seconds
 
     def embed_texts(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
-        vectors: list[tuple[float, ...]] = []
-        for text in texts:
-            vectors.append(self._pseudo_embed(text))
-        return tuple(vectors)
-
-    def _pseudo_embed(self, text: str) -> tuple[float, ...]:
-        # Deterministic fallback for environments where Ollama is not yet wired.
-        cleaned = text.strip().lower()
-        if not cleaned:
-            return (0.0,)
-        buckets = [0.0] * 8
-        for index, char in enumerate(cleaned):
-            buckets[index % len(buckets)] += (ord(char) % 97) / 97.0
-        return tuple(round(value, 6) for value in buckets)
+        if not texts:
+            return ()
+        response = requests.post(
+            f"{self._base_url.rstrip('/')}/api/embed",
+            json={"model": self.model_name, "input": list(texts)},
+            timeout=self._timeout_seconds,
+        )
+        response.raise_for_status()
+        data = response.json()
+        raw_embeddings = data.get("embeddings")
+        if not isinstance(raw_embeddings, list) or len(raw_embeddings) != len(texts):
+            raise RuntimeError("Ollama returned an unexpected embedding response.")
+        vectors = tuple(tuple(float(value) for value in vector) for vector in raw_embeddings)
+        if any(not vector for vector in vectors):
+            raise RuntimeError("Ollama returned an empty embedding vector.")
+        return vectors
 
 
 class EmbeddingService:
@@ -97,6 +106,20 @@ class EmbeddingService:
 
     def embed_chunking_result(self, result: ChunkingResult) -> EmbeddingBatchResult:
         return self.embed_chunks(result.chunks, source_name=result.source_name, source_path=result.source_path)
+
+    def embed_query(self, query: str) -> tuple[float, ...]:
+        vectors = self.embed_texts((query,))
+        if len(vectors) != 1 or not vectors[0]:
+            raise RuntimeError("Embedding provider did not return a vector for the search query.")
+        return vectors[0]
+
+    def embed_texts(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+        if not texts:
+            return ()
+        vectors = self._provider.embed_texts(texts)
+        if len(vectors) != len(texts) or any(not vector for vector in vectors):
+            raise RuntimeError("Embedding provider returned an invalid embedding batch.")
+        return vectors
 
     def embed_chunks(
         self,
@@ -126,8 +149,9 @@ class EmbeddingService:
             uncached_chunks: list[Chunk] = []
 
             for chunk in batch:
-                cached = self._cache.get(chunk.chunk_id, self.model_name, checksum=self._chunk_checksum(chunk))
-                if cached is not None:
+                cache_result = self._cache.get(chunk, self.model_name)
+                cached = cache_result.embedding
+                if cache_result.hit and cached is not None:
                     cache_hits += 1
                     records.append(
                         EmbeddingRecord(
@@ -175,14 +199,7 @@ class EmbeddingService:
                         },
                     )
                     records.append(record)
-                    self._cache.set(
-                        CachedEmbedding(
-                            chunk_id=chunk.chunk_id,
-                            model_name=self.model_name,
-                            checksum=checksum,
-                            vector=vector,
-                        )
-                    )
+                    self._cache.set(chunk, self.model_name, vector)
 
         return EmbeddingBatchResult(
             source_name=source_name,

@@ -13,6 +13,12 @@ services:
       - .env
 
     environment:
+      OLLAMA_HOST: "${OLLAMA_HOST:-host.docker.internal}"
+      OLLAMA_PORT: "${OLLAMA_PORT:-11434}"
+      OLLAMA_EMBEDDING_MODEL: "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"
+      OLLAMA_CHAT_TIMEOUT_SECONDS: "${OLLAMA_CHAT_TIMEOUT_SECONDS:-180}"
+      QDRANT_HOST: "${QDRANT_HOST:-qdrant}"
+      QDRANT_PORT: "6333"
       WATCH_ENABLED: "${WATCH_ENABLED:-false}"
       WATCH_LOCAL_ENABLED: "${WATCH_LOCAL_ENABLED:-true}"
       WATCH_NETWORK_ENABLED: "${WATCH_NETWORK_ENABLED:-true}"
@@ -21,6 +27,8 @@ services:
       WATCH_DEBOUNCE_SECONDS: "${WATCH_DEBOUNCE_SECONDS:-2}"
       WATCH_POLL_INTERVAL: "${WATCH_POLL_INTERVAL:-30}"
       WATCH_IGNORE_PATTERNS: "${WATCH_IGNORE_PATTERNS:-~$*,*.tmp,*.part}"
+      WATCH_HOST_PATH: "${WATCH_HOST_PATH:-}"
+      SOURCE_PUBLIC_BASE_URL: "${SOURCE_PUBLIC_BASE_URL:-http://localhost:${BACKEND_PORT:-8000}}"
 
     ports:
       - "${BACKEND_PORT}:8000"
@@ -60,10 +68,12 @@ services:
     restart: unless-stopped
 
     depends_on:
-      - qdrant
+      - backend
 
     environment:
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OPENAI_API_BASE_URLS: "http://backend:8000/v1"
+      OPENAI_API_KEYS: "local-knowledge-ai"
+      ENABLE_OLLAMA_API: "false"
 
     ports:
       - "${OPENWEBUI_PORT}:8080"

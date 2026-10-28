@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 
 from backend.api import dependencies
+from backend.api.graph import router as graph_router
 from backend.api.health import router as health_router
-from backend.api.routes import router as api_router
+from backend.api.routes import openai_router, router as api_router
 from backend.config.logging import configure_logging
 from backend.watchers.watch_service import WatchService
 from backend.workers.processing_worker import ProcessingWorker
@@ -55,6 +56,8 @@ app = FastAPI(
 
 app.include_router(health_router)
 app.include_router(api_router)
+app.include_router(graph_router)
+app.include_router(openai_router)
 
 
 @app.get("/watcher", tags=["health"])

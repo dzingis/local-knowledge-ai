@@ -83,9 +83,31 @@ class QdrantRepository:
         )
 
     def search(self, vector: tuple[float, ...], limit: int | None = None, filters: dict[str, Any] | None = None) -> QdrantSearchResult:
+        self.ensure_collection(vector_size=len(vector))
         hits = self._client.search(self.collection_name, vector, limit=limit or self._config.default_limit, filters=filters)
         return QdrantSearchResult(collection_name=self.collection_name, hits=hits, query_metadata={"filters": filters or {}})
 
     def upsert_records(self, records: list[EmbeddingRecord]) -> QdrantUpsertResult:
-        batch = EmbeddingBatchResult(records=tuple(records))
+        if not records:
+            return self.upsert_embeddings(
+                EmbeddingBatchResult(
+                    source_name="",
+                    source_path="",
+                    model_name="",
+                    chunk_count=0,
+                    embedded_count=0,
+                    cache_hits=0,
+                    cache_misses=0,
+                )
+            )
+        batch = EmbeddingBatchResult(
+            source_name=records[0].document_title or "",
+            source_path=records[0].source_path or "",
+            model_name=records[0].model_name,
+            chunk_count=len(records),
+            embedded_count=len(records),
+            cache_hits=0,
+            cache_misses=len(records),
+            records=tuple(records),
+        )
         return self.upsert_embeddings(batch)

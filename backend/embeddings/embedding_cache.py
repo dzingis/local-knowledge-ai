@@ -65,4 +65,4 @@ class InMemoryEmbeddingCache:
         return tuple(self.get(chunk, model_name) for chunk in chunks)
 
     def _checksum(self, chunk: Chunk) -> str:
-        return chunk.metadata.chunk_id + "|" + chunk.text[:128]
+        return chunk.chunk_id + "|" + chunk.text[:128]

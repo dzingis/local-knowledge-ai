@@ -13,6 +13,7 @@ from backend.parsers.parser_models import ParsedDocument, ParsedObjectType, Pars
 class PdfPage:
     page_number: int
     text: str
+    ocr_used: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,8 @@ class PdfParseResult:
 class PdfParser:
     """Parse PDF documents into the shared parser model."""
 
+    _MIN_IMAGE_PAGE_AREA_RATIO = 0.2
+
     def parse_text(self, text: str, source_path: str | Path = "<memory>") -> PdfParseResult:
         source = Path(source_path)
         pages = tuple(PdfPage(page_number=1, text=text.strip()))
@@ -63,13 +66,20 @@ class PdfParser:
         with pymupdf.open(source) as doc:
             pages: list[PdfPage] = []
             texts: list[str] = []
+            ocr_pages: list[int] = []
             for index, page in enumerate(doc, start=1):
                 page_text = page.get_text("text").strip()
-                pages.append(PdfPage(page_number=index, text=page_text))
+                ocr_used = self._has_picture_content(page)
+                if ocr_used:
+                    text_page = page.get_textpage_ocr(language="eng+hrv", dpi=300, full=False)
+                    page_text = page.get_text("text", textpage=text_page).strip()
+                    ocr_pages.append(index)
+                pages.append(PdfPage(page_number=index, text=page_text, ocr_used=ocr_used))
                 if page_text:
                     texts.append(page_text)
             metadata = {
                 "page_count": len(pages),
+                "ocr_pages": ocr_pages,
                 "file_size": source.stat().st_size if source.exists() else None,
                 "title": doc.metadata.get("title") if getattr(doc, "metadata", None) else None,
             }
@@ -81,6 +91,19 @@ class PdfParser:
             text="\n\n".join(texts).strip(),
             metadata=metadata,
             page_count=len(pages),
+        )
+
+    def _has_picture_content(self, page: pymupdf.Page) -> bool:
+        page_area = page.rect.width * page.rect.height
+        if page_area <= 0:
+            return False
+
+        return any(
+            (image_bbox := pymupdf.Rect(image["bbox"])).width
+            * image_bbox.height
+            / page_area
+            >= self._MIN_IMAGE_PAGE_AREA_RATIO
+            for image in page.get_image_info(xrefs=True)
         )
 
     def summarize(self, result: PdfParseResult) -> ParserSummary:

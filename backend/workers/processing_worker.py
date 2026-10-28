@@ -6,15 +6,21 @@ from enum import Enum
 import logging
 from pathlib import Path
 import threading
-import time
 from typing import Protocol
 
-from backend.chunking.chunk_engine import ChunkEngine, ChunkingConfig, ChunkingResult
+from backend.chunking.chunk_engine import (
+    ChunkEngine,
+    ChunkingConfig,
+    ChunkingResult,
+    ParsedDocument as ChunkInputDocument,
+)
 from backend.embeddings.embedding_service import EmbeddingBatchResult, EmbeddingService
 from backend.indexer.index_manager import ChangeType
 from backend.indexer.sql_queue_repository import QueueRepositoryRecord, SqlQueueRepository
 from backend.parsers.parser_models import ParsedDocument
 from backend.parsers.parser_service import ParserService
+from backend.repositories.knowledge_repository import KnowledgeRepository
+from backend.services.graph_indexing_service import GraphIndexingService, GraphIndexResult
 from backend.vectorstore.qdrant_repository import QdrantRepository, QdrantUpsertResult
 
 
@@ -59,6 +65,7 @@ class WorkerResult:
     chunking_result: ChunkingResult | None = None
     embedding_result: EmbeddingBatchResult | None = None
     qdrant_result: QdrantUpsertResult | None = None
+    graph_index_result: GraphIndexResult | None = None
 
 
 class QueueProcessor(Protocol):
@@ -75,22 +82,85 @@ class ParserQueueProcessor:
         chunk_engine: ChunkEngine | None = None,
         embedding_service: EmbeddingService | None = None,
         qdrant_repository: QdrantRepository | None = None,
+        knowledge_repository: KnowledgeRepository | None = None,
+        graph_indexing_service: GraphIndexingService | None = None,
     ) -> None:
         self._parser_service = parser_service
         self._chunk_engine = chunk_engine or ChunkEngine(ChunkingConfig())
         self._embedding_service = embedding_service
         self._qdrant_repository = qdrant_repository
+        self._knowledge_repository = knowledge_repository
+        self._graph_indexing_service = graph_indexing_service
 
     def __call__(self, record: QueueRepositoryRecord) -> WorkerResult:
         try:
             parsed = self._parser_service.parse_file(record.full_path)
-            chunking_result = self._chunk_engine.chunk_document(parsed)
+            chunking_input = ChunkInputDocument(
+                source_name=parsed.title or Path(record.full_path).name,
+                source_path=str(parsed.source_path),
+                text=parsed.text,
+                source_type=parsed.parser_kind.value,
+                page_number=None,
+                heading=None,
+                metadata={key: str(value) for key, value in parsed.metadata.items()},
+            )
+            chunking_result = self._chunk_engine.chunk_document(chunking_input)
+            graph_index_result = None
+            if self._graph_indexing_service is not None:
+                if self._knowledge_repository is None:
+                    raise RuntimeError(
+                        "KnowledgeRepository is required when graph indexing is enabled."
+                    )
+                document_id = self._knowledge_repository.ensure_document_record(
+                    parsed=parsed,
+                    modified_at=record.modified_utc,
+                    file_size_bytes=record.file_size_bytes,
+                    file_checksum=record.sha256,
+                )
+                graph_index_result = self._graph_indexing_service.index_document(
+                    parsed, document_id
+                )
             embedding_result = None
             qdrant_result = None
             if self._embedding_service is not None and chunking_result.chunks:
-                embedding_result = self._embedding_service.embed_chunks(chunking_result.chunks)
-                if self._qdrant_repository is not None and embedding_result.records:
-                    qdrant_result = self._qdrant_repository.upsert_embedding_records(embedding_result.records)
+                embedding_result = self._embedding_service.embed_chunks(
+                    chunking_result.chunks,
+                    source_name=chunking_result.source_name,
+                    source_path=chunking_result.source_path,
+                )
+            if self._knowledge_repository is not None:
+                if embedding_result is None:
+                    embedding_result = EmbeddingBatchResult(
+                        source_name=chunking_result.source_name,
+                        source_path=chunking_result.source_path,
+                        model_name="",
+                        chunk_count=len(chunking_result.chunks),
+                        embedded_count=0,
+                        cache_hits=0,
+                        cache_misses=0,
+                    )
+                document_id, stale_chunk_ids = self._knowledge_repository.store_indexed_document(
+                    parsed=parsed,
+                    chunks=chunking_result.chunks,
+                    embeddings=embedding_result,
+                    modified_at=record.modified_utc,
+                    file_size_bytes=record.file_size_bytes,
+                    file_checksum=record.sha256,
+                )
+                embedding_result = replace(
+                    embedding_result,
+                    records=tuple(
+                        replace(record, metadata={**record.metadata, "document_id": document_id})
+                        for record in embedding_result.records
+                    ),
+                )
+                if self._qdrant_repository is not None:
+                    if stale_chunk_ids:
+                        self._qdrant_repository.delete_embeddings(list(stale_chunk_ids))
+                    if embedding_result.records:
+                        qdrant_result = self._qdrant_repository.upsert_embeddings(embedding_result)
+            elif self._qdrant_repository is not None and embedding_result is not None and embedding_result.records:
+                qdrant_result = self._qdrant_repository.upsert_embeddings(embedding_result)
             return WorkerResult(
                 file_path=record.full_path,
                 outcome=WorkerOutcome.COMPLETED,
@@ -98,6 +168,7 @@ class ParserQueueProcessor:
                 chunking_result=chunking_result,
                 embedding_result=embedding_result,
                 qdrant_result=qdrant_result,
+                graph_index_result=graph_index_result,
             )
         except Exception as exc:  # pragma: no cover - defensive parser boundary
             return WorkerResult(
@@ -251,7 +322,11 @@ class ProcessingWorker:
     def process_path(self, path: str | Path) -> WorkerResult:
         record = next((item for item in self._repository.get_pending() if item.full_path == str(path)), None)
         if record is None:
-            return WorkerResult(file_path=str(path), outcome=WorkerOutcome.FAILED, error_message="Path not queued")
+            return WorkerResult(
+                file_path=str(path),
+                outcome=WorkerOutcome.FAILED,
+                error_message="Putanja nije u redu čekanja / Path is not queued.",
+            )
         self._repository.mark_processing(record.full_path)
         return self._processor(record)
 

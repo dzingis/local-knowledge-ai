@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable, Sequence
+from uuid import NAMESPACE_URL, uuid5
 
 
 class ChunkStrategy(str, Enum):
@@ -195,7 +196,7 @@ class ChunkEngine:
             chunk_index=chunk_index,
             token_count=token_count,
         )
-        chunk_id = f"{document.source_path}:{chunk_index:04d}"
+        chunk_id = str(uuid5(NAMESPACE_URL, f"{document.source_path}:{chunk_index:04d}"))
         return Chunk(chunk_id=chunk_id, text=text.strip(), metadata=metadata)
 
     def _split_into_paragraphs(self, text: str) -> list[str]:

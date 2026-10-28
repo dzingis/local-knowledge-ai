@@ -1,12 +1,14 @@
-# Backend
+# Backend / Pozadinski sustav
 
-Python backend for Local Knowledge AI.
+Python backend for Local Knowledge AI. / Pythonov pozadinski sustav za Local
+Knowledge AI.
 
-Planned modules:
+Modules / Moduli:
+
 - API
-- Indexer
-- Parsers
+- Indexer / Indeksiranje
+- Parsers / Parseri
 - Embeddings
-- Search
-- Watcher
-- Services
+- Search / Pretraživanje
+- Watcher / Nadzor mapa
+- Services / Servisi

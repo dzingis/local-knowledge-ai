@@ -34,6 +34,14 @@ COPY requirements.txt .
 RUN python -m pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Install local OCR engine and Croatian/English language data
+RUN apt-get update && \
+    apt-get install -y \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        tesseract-ocr-hrv && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy application
 COPY backend/ ./backend/
 

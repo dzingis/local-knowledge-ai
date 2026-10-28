@@ -37,9 +37,9 @@ class ParserService:
         suffix = file_path.suffix.lower()
 
         if suffix == ".sql":
-            return self.sql_parser.parse_file(file_path)
+            return self.sql_parser.parse_file(file_path).to_parsed_document()
         if suffix == ".pdf":
-            return self.pdf_parser.parse_file(file_path)
+            return self.pdf_parser.parse_file(file_path).to_parsed_document()
         if suffix == ".docx":
             return self.word_parser.parse_file(file_path)
         if suffix in {".pas", ".dfm"}:

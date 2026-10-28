@@ -77,9 +77,9 @@ class TextParser:
 
     def _load_text(self, path: Path) -> str:
         try:
-            return path.read_text(encoding="utf-8")
+            return path.read_bytes().decode("utf-8-sig")
         except UnicodeDecodeError:
-            return path.read_text(encoding="utf-8", errors="ignore")
+            return path.read_bytes().decode("cp1250")
         except OSError:
             return ""
 

@@ -294,6 +294,24 @@ class SqlQueueRepository:
             connection.commit()
             return cursor.rowcount > 0
 
+    def requeue_completed(self) -> int:
+        with self._connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE AI.IngestionQueue
+                SET Status = ?,
+                    ErrorMessage = NULL,
+                    ProcessedAt = NULL,
+                    EnqueuedAt = SYSUTCDATETIME()
+                WHERE Status = ? AND ChangeType <> ?;
+                """,
+                (QueueStatus.PENDING.value, QueueStatus.COMPLETED.value, ChangeType.DELETED.value),
+            )
+            queued = cursor.rowcount
+            connection.commit()
+        return queued
+
     def remove(self, full_path: str) -> bool:
         with self._connect() as connection:
             cursor = connection.cursor()

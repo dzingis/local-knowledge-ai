@@ -1,33 +1,35 @@
-# Roadmap
+# Roadmap / Plan razvoja
 
-## Milestone 1: Foundation
-- Local model runtime with Ollama
-- Open WebUI setup
-- SQL Server metadata database
-- Qdrant vector store
-- Base repository structure
-- Runtime configuration
+## Milestone 1: Foundation / Temelji
 
-## Milestone 2: Ingestion
-- File watcher
-- Text extraction pipeline
-- Chunking and embedding pipeline
-- Document metadata persistence
+- Local model runtime with Ollama. / Lokalno izvođenje modela pomoću Ollame.
+- Open WebUI setup. / Postavljanje Open WebUI-ja.
+- SQL Server metadata database. / Baza metapodataka u SQL Serveru.
+- Qdrant vector store. / Vektorska baza Qdrant.
+- Base repository structure and runtime configuration. / Osnovna struktura repozitorija i konfiguracija izvođenja.
 
-## Milestone 3: Search
-- Hybrid semantic and keyword search
-- Source citations
-- Open original file links
-- Folder and page navigation
+## Milestone 2: Ingestion / Unos
 
-## Milestone 4: Code Intelligence
-- SQL parser
-- Delphi parser
-- Swagger/OpenAPI parser
-- Cross-reference extraction
+- File watcher. / Nadzor mapa.
+- Text extraction pipeline. / Sustav za izdvajanje teksta.
+- Chunking and embedding pipeline. / Dijeljenje teksta na odlomke i izrada embeddinga.
+- Document metadata persistence. / Trajna pohrana metapodataka dokumenata.
 
-## Milestone 5: Production Readiness
-- Security and permissions
-- Logging and audit
-- Incremental indexing
-- Backup and restore guidance
+## Milestone 3: Search / Pretraživanje
+
+- Hybrid semantic and keyword search. / Hibridno semantičko pretraživanje i pretraživanje po ključnim riječima.
+- Source citations. / Citiranje izvora.
+- Open original file links. / Otvaranje poveznica na izvorne datoteke.
+- Folder and page navigation. / Navigacija mapama i stranicama.
+
+## Milestone 4: Code Intelligence / Razumijevanje koda
+
+- SQL, Delphi, and Swagger/OpenAPI parsers. / Parseri za SQL, Delphi i Swagger/OpenAPI.
+- Cross-reference extraction. / Izdvajanje međusobnih referenci.
+
+## Milestone 5: Production Readiness / Priprema za produkciju
+
+- Security and permissions. / Sigurnost i dozvole.
+- Logging and audit. / Bilježenje događaja i revizija.
+- Incremental indexing. / Inkrementalno indeksiranje.
+- Backup and restore guidance. / Upute za sigurnosne kopije i vraćanje podataka.

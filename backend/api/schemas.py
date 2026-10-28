@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,104 @@ class ReindexRequest(BaseModel):
 
 class IngestRequest(BaseModel):
     file_path: str
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(
+        min_length=1,
+        max_length=4000,
+        description=(
+            "Question or search phrase in Croatian or English. Prefix with SQL:, PDF:, "
+            "DOCX:, DELPHI:, MARKDOWN:, or TEXT: to restrict file types; without a "
+            "prefix all file types are searched. / Pitanje ili izraz za pretraživanje "
+            "na hrvatskom ili engleskom. Prefiksom SQL:, PDF:, DOCX:, DELPHI:, "
+            "MARKDOWN: ili TEXT: ograničite vrste datoteka; bez prefiksa pretražuju "
+            "se sve vrste."
+        ),
+    )
+    limit: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Maximum number of passages. / Najveći broj odlomaka.",
+    )
+
+
+class SearchHitResponse(BaseModel):
+    chunk_id: str
+    document_id: str
+    title: str
+    source_path: str
+    text: str
+    score: float
+    page_number: int | None = None
+    heading: str | None = None
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: list[SearchHitResponse] = Field(default_factory=list)
+
+
+class GraphEntityResponse(BaseModel):
+    entity_id: str
+    name: str
+    normalized_name: str
+    entity_type: str
+    description: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    aliases: list[str] = Field(default_factory=list)
+    properties: dict[str, str] = Field(default_factory=dict)
+    source_document_ids: list[str] = Field(default_factory=list)
+
+
+class GraphRelationshipResponse(BaseModel):
+    relationship_id: str
+    source_entity_id: str
+    source_name: str | None = None
+    target_entity_id: str
+    target_name: str | None = None
+    relationship_type: str
+    confidence: float = Field(ge=0, le=1)
+    source_document_id: str | None = None
+    evidence: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphDocumentResponse(BaseModel):
+    document_id: str
+    source_path: str
+    entities: list[GraphEntityResponse] = Field(default_factory=list)
+    relationships: list[GraphRelationshipResponse] = Field(default_factory=list)
+
+
+class GraphStatisticsResponse(BaseModel):
+    entity_count: int
+    relationship_count: int
+    entity_types: dict[str, int]
+    most_connected: list[tuple[str, int]]
+    orphan_entity_count: int
+    average_degree: float
+
+
+class GraphOperationResponse(BaseModel):
+    success: bool
+    documents_processed: int = 0
+    entities_processed: int = 0
+    relationships_processed: int = 0
+    message: str
+
+
+class OpenAIChatMessage(BaseModel):
+    role: Literal["system", "developer", "user", "assistant"]
+    content: str
+
+
+class OpenAIChatCompletionRequest(BaseModel):
+    model: str
+    messages: list[OpenAIChatMessage] = Field(min_length=1)
+    stream: bool = False
+    temperature: float | None = Field(default=None, ge=0, le=2)
 
 
 class IngestResponse(BaseModel):
